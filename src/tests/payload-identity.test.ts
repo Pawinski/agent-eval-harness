@@ -63,7 +63,7 @@ describe("payload-identity", () => {
     expect(capturedHeaders["X-Title"]).toBe("agent-eval-harness");
   });
 
-  it("HTTP-Referer header is unchanged", async () => {
+  it("HTTP-Referer header is the repo URL", async () => {
     const client = new OpenRouterClient({
       apiKey: "test-key",
       defaultModel: "test/model",
@@ -73,9 +73,7 @@ describe("payload-identity", () => {
       messages: [{ role: "user", content: "test prompt" }],
     });
 
-    expect(capturedHeaders["HTTP-Referer"]).toBe(
-      ["https://github.com/Pawinski/", "basi", "lisk-eval"].join(""),
-    );
+    expect(capturedHeaders["HTTP-Referer"]).toBe("https://github.com/Pawinski/agent-eval-harness");
   });
 
   it("request body structure is identical for same input", async () => {

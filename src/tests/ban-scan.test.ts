@@ -67,8 +67,19 @@ function runCli(env: NodeJS.ProcessEnv): { status: number | null; stdout: string
   }
 }
 
-function allowedHitLines(): string[] {
-  return [...ALLOWLIST].flatMap(([f, ls]) => [...ls].map((l) => `${f}:${l} [allowed]`));
+/**
+ * Mirror the real src/llm/client.ts under `root` with the synthetic term appended to its
+ * HTTP-Referer line (the line the old allowlist exempted). Returns that 1-indexed line.
+ */
+function plantOnRefererLine(root: string): number {
+  const rel = path.join("src", "llm", "client.ts");
+  mkdirSync(path.join(root, "src", "llm"), { recursive: true });
+  const lines = readFileSync(path.join(REPO_ROOT, rel), "utf8").split("\n");
+  const idx = lines.findIndex((l) => l.includes('"HTTP-Referer"'));
+  expect(idx).toBeGreaterThanOrEqual(0);
+  lines[idx] = `${lines[idx]} // ${SYNTHETIC_TERM}`;
+  writeFileSync(path.join(root, rel), lines.join("\n"));
+  return idx + 1;
 }
 
 describe("ban-scan", () => {
@@ -210,26 +221,24 @@ describe("ban-scan", () => {
     expect(result.total).toBe(0);
   });
 
-  it("default allowlist does not exempt other lines of the real client.ts", () => {
+  it("default allowlist is empty: a hit on the real client.ts Referer line is not exempt", () => {
+    expect(ALLOWLIST.size).toBe(0);
     const rel = path.join("src", "llm", "client.ts");
-    mkdirSync(path.join(tempDir, "src", "llm"), { recursive: true });
-    const original = readFileSync(path.join(REPO_ROOT, rel), "utf8");
-    const planted = `${original.replace(/\n?$/, "\n")}// ${SYNTHETIC_TERM}\n`;
-    writeFileSync(path.join(tempDir, rel), planted);
-    const plantedLine = planted.split("\n").length - 1;
+    const plantedLine = plantOnRefererLine(tempDir);
 
-    // Line granularity of the default allowlist, applied explicitly to a mirror of the file.
+    // The default allowlist, applied explicitly to a mirror of the real file.
     const result = runScan(tempDir, BANNED_HASHES, IGNORE_DIRS, ALLOWLIST, new Set([SYNTHETIC_HASH]));
-    const allowedLines = [...(ALLOWLIST.get("src/llm/client.ts") ?? [])];
-    expect(result.hits.filter((h) => h.allowed).map((h) => h.line)).toEqual(allowedLines);
-    expect(result.hits.filter((h) => !h.allowed).map((h) => h.line)).toEqual([plantedLine]);
-    expect(formatOutput(result)).toContain("FAIL: 1 non-allowed hit(s)");
+    expect(result.hits.map((h) => [h.path, h.line, h.allowed])).toEqual([[rel, plantedLine, false]]);
+    expect(result.allowedCount).toBe(0);
+    expect(formatOutput(result)).toContain("FAIL: 1 non-allowed hit(s), 0 allowed");
   });
 
   it("default allowlist applies only at the repo root (resolved real path)", () => {
     expect(isRepoRoot(REPO_ROOT)).toBe(true);
     expect(allowlistFor(REPO_ROOT)).toBe(ALLOWLIST);
     expect(isRepoRoot(tempDir)).toBe(false);
+    // Any other root gets its own empty map, never the default allowlist object.
+    expect(allowlistFor(tempDir)).not.toBe(ALLOWLIST);
     expect(allowlistFor(tempDir).size).toBe(0);
     // A symlink to the repo root resolves to the repo root.
     const link = path.join(tempDir, "repo-link");
@@ -238,20 +247,15 @@ describe("ban-scan", () => {
     expect(isRepoRoot(path.join(REPO_ROOT, "src", ".."))).toBe(true);
   });
 
-  it("CLI at a non-repo root does not apply the default allowlist", () => {
-    // Mirror the allowlisted files at their repo-relative paths under a temp root.
-    for (const rel of ALLOWLIST.keys()) {
-      mkdirSync(path.join(tempDir, path.dirname(rel)), { recursive: true });
-      cpSync(path.join(REPO_ROOT, rel), path.join(tempDir, rel));
-    }
-    const { status, stdout } = runCli({ ...repoCliEnv(), BAN_SCAN_ROOT: tempDir });
-    const expected = [...ALLOWLIST].flatMap(([f, ls]) => [...ls].map((l) => `${f}:${l}`));
+  it("CLI at a non-repo root reports a hit on the mirrored Referer line as non-allowed", () => {
+    const plantedLine = plantOnRefererLine(tempDir);
+    const { status, stdout } = runCli({ ...repoCliEnv(), BAN_SCAN_ROOT: tempDir, BAN_SCAN_TEST_HASH: SYNTHETIC_HASH });
     const hitLines = stdout.split("\n").filter((l) => /:\d+( \[allowed\])?$/.test(l));
 
     expect(status).toBe(1);
-    expect(hitLines.sort()).toEqual(expected.sort());
+    expect(hitLines).toEqual([`${path.join("src", "llm", "client.ts")}:${plantedLine}`]);
     expect(stdout).not.toContain("[allowed]");
-    expect(stdout).toContain(`FAIL: ${expected.length} non-allowed hit(s), 0 allowed`);
+    expect(stdout).toContain("FAIL: 1 non-allowed hit(s), 0 allowed");
   });
 
   it("exitCode is 1 on non-allowed hits and 0 otherwise", () => {
@@ -260,13 +264,13 @@ describe("ban-scan", () => {
     expect(exitCode({ hits: [], total: 0, allowedCount: 0 })).toBe(0);
   });
 
-  it("CLI on the repo exits 0 with exactly the allowlisted hits", () => {
+  it("CLI on the repo exits 0 with no hits at all, allowed or not", () => {
     const { status, stdout } = runCli(repoCliEnv());
-    const expected = allowedHitLines();
     const hitLines = stdout.split("\n").filter((l) => /:\d+( \[allowed\])?$/.test(l));
     expect(status).toBe(0);
-    expect(hitLines.sort()).toEqual(expected.sort());
-    expect(stdout).toContain(`PASS: 0 non-allowed hits, ${expected.length} allowed`);
+    expect(hitLines).toEqual([]);
+    expect(stdout).toContain("PASS: 0 hits");
+    expect(stdout).not.toContain("allowed");
   });
 
   it("whole-repo CLI ignores BAN_SCAN_ROOT in the parent env and catches a hit planted in the repo", () => {
@@ -283,12 +287,12 @@ describe("ban-scan", () => {
     try {
       writeFileSync(plantPath, `note: ${token}\n`);
       const { status, stdout } = runCli(repoCliEnv({ BAN_SCAN_TEST_HASH: hashString(token) }));
-      const expected = [...allowedHitLines(), `${plantRel}:1`];
+      const expected = [`${plantRel}:1`];
       const hitLines = stdout.split("\n").filter((l) => /:\d+( \[allowed\])?$/.test(l));
 
       expect(status).toBe(1);
       expect(hitLines.sort()).toEqual(expected.sort());
-      expect(stdout).toContain(`FAIL: 1 non-allowed hit(s), ${allowedHitLines().length} allowed`);
+      expect(stdout).toContain("FAIL: 1 non-allowed hit(s), 0 allowed");
       expect(stdout).not.toContain(token);
     } finally {
       rmSync(plantPath, { force: true });

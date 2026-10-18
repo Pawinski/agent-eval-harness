@@ -54,11 +54,9 @@ export const MAX_TERM_LEN = 24;
 /**
  * Allowlist: file paths (relative to root) with specific line numbers that are permitted.
  * Keyed by relative path, value is set of 1-indexed line numbers.
+ * Empty by default: the tree carries no exempted lines. Applies only at the repo root (allowlistFor).
  */
-export const ALLOWLIST: Map<string, Set<number>> = new Map([
-  ["src/llm/client.ts", new Set([261])],
-  ["src/tests/payload-identity.test.ts", new Set([77])],
-]);
+export const ALLOWLIST: Map<string, Set<number>> = new Map();
 
 export const SCAN_EXTENSIONS = [
   ".ts",

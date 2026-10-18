@@ -258,7 +258,7 @@ export class OpenRouterClient implements LlmClient {
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/Pawinski/basilisk-eval",
+        "HTTP-Referer": "https://github.com/Pawinski/agent-eval-harness",
         "X-Title": PROJECT_NAME,
       },
       body: JSON.stringify(body),
