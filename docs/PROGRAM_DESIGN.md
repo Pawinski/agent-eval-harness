@@ -13,10 +13,11 @@ what they need without a guide.
    `a`, `b`, `c` or `01-`. A sequence says when something was written, not what it holds.
 3. **No acronyms or abbreviations in names.** This covers files, folders, classes,
    variables and functions. Write the whole word:
-   - `mcp` becomes `modelContextProtocol`, `llm` becomes `languageModel`, `id` becomes
-     `identifier`. For `csv`, name what the data holds; failing that, `commaSeparated`.
-   - Common short words too: `configuration`, `maximum`, `dollars` (or `currency` where
-     needed), `commitHash`.
+   - `llm` becomes `languageModel`. For `csv`, name what the data holds; failing that,
+     `commaSeparated`.
+   - Common short words too: `maximum`, `dollars` (or `currency` where needed),
+     `commitHash`.
+   - Allowed short words: `id`, `mcp`, `config`.
    - Exception: a key a tool requires, or a field of a third-party API we do not control.
 4. **Group by logic, then split by logic.** Keep code that changes together in one place.
    When a group grows, split it along the lines of what it does, and name each file for
