@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { OpenRouterClient } from "../llm/client.js";
+import { createLlmClient, OpenRouterClient } from "../llm/client.js";
 import { createHash } from "node:crypto";
 import { PROJECT_NAME } from "../name.js";
 import { ReactAgent } from "../agent/react.js";
@@ -48,6 +48,7 @@ describe("payload-identity", () => {
   afterEach(() => {
     global.fetch = originalFetch;
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("X-Title header uses PROJECT_NAME constant", async () => {
@@ -130,6 +131,10 @@ describe("payload-identity", () => {
   });
 
   it("full-suite request bodies match the pre-rename golden (0.1.0 and 0.2.0)", async () => {
+    // Build the client exactly as `npm run eval` does: library defaults, no env overrides.
+    for (const k of ["MAX_TOKENS", "AGENT_EVAL_CACHE_BREAKPOINT", ["BASI", "LISK_CACHE_BREAKPOINT"].join("")]) {
+      vi.stubEnv(k, undefined as unknown as string);
+    }
     const bodies: string[] = [];
     global.fetch = vi.fn().mockImplementation(async (_url, init) => {
       bodies.push(init?.body as string);
@@ -148,7 +153,7 @@ describe("payload-identity", () => {
       bodies.length = 0;
       for (const t of tasks as ReadonlyArray<{ prompt: string; expectedTools?: string[]; maxSteps?: number }>) {
         const agent = new ReactAgent({
-          llm: new OpenRouterClient({ apiKey: "k", defaultModel: "m/x", maxTokens: 512, cacheBreakpoint: false }),
+          llm: createLlmClient({ apiKey: "k", defaultModel: "m/x" }),
           tools: tools(),
           maxSteps: t.maxSteps ?? 8,
           expectedTools: t.expectedTools,
