@@ -8,6 +8,7 @@ import {
   validatePricesForModels,
   createFixturePrices,
   sortModelsByCost,
+  sortModelsByFullWorstCase,
   checkGitStatus,
   getResultsDir,
   runMatrix,
@@ -19,6 +20,7 @@ import {
   getDefaultIMax,
   getDefaultMaxInputTokens,
   getSuiteTasks,
+  getCallsPerRun,
   SUITE_CONFIGS,
   MatrixAbort,
   MatrixLlmClient,
@@ -245,6 +247,36 @@ describe("model sorting", () => {
     expect(sorted[0]).toBe("cheap");
     expect(sorted[1]).toBe("medium");
     expect(sorted[2]).toBe("expensive");
+  });
+
+  it("sortModelsByFullWorstCase uses per-task callsPerRun (118 for 0.2.0)", () => {
+    const priceData: PriceData = {
+      fetchedAt: new Date().toISOString(),
+      models: new Map([
+        ["expensive", { modelId: "expensive", promptPrice: 0.000012, completionPrice: 0.00006 }],
+        ["cheap", { modelId: "cheap", promptPrice: 0.000001, completionPrice: 0.000002 }],
+      ]),
+    };
+
+    const callsPerRun020 = getCallsPerRun("0.2.0");
+    expect(callsPerRun020).toBe(118);
+
+    const iMax = 4700;
+    const runs = 3;
+
+    const sorted = sortModelsByFullWorstCase(
+      ["expensive", "cheap"],
+      priceData,
+      runs,
+      callsPerRun020,
+      iMax,
+    );
+
+    expect(sorted[0]).toBe("cheap");
+    expect(sorted[1]).toBe("expensive");
+
+    const callsPerRun010 = getCallsPerRun("0.1.0");
+    expect(callsPerRun010).toBe(56);
   });
 });
 

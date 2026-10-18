@@ -25,6 +25,8 @@ const VERIFICATION_SALT = "v020-check-7f3a9c";
 const RESULT_PREFIX = "__RESULTS__:";
 const MAX_STDOUT_BYTES = 1024;
 const CHILD_TIMEOUT_MS = 2000;
+/** vm timeout for the freeze/serializer prelude inside the patch-check worker. */
+export const PRELUDE_TIMEOUT_MS = 50;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_ROOT = path.resolve(__dirname, "../../fixtures");
@@ -541,7 +543,7 @@ process.stdin.on("end", () => {
         globalThis.__defineProperty = _defineProperty;
       })();
     \`);
-    preludeScript.runInContext(ctx, { timeout: 20 });
+    preludeScript.runInContext(ctx, { timeout: ${PRELUDE_TIMEOUT_MS} });
     
     // Step 2: Run the patched function source in strict mode
     const funcScript = new vm.Script('"use strict";\\n' + code);

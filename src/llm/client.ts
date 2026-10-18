@@ -25,13 +25,33 @@ export type LlmCompletionResponse = {
   model: string;
   usage?: { promptTokens?: number; completionTokens?: number; cachedTokens?: number };
   raw?: unknown;
+  _meta?: LlmCallMeta;
 };
+
+export interface LlmCallMeta {
+  retries?: number;
+  droppedParameters?: string[];
+  providerError?: { code?: string; type?: string };
+  temperatureSent?: boolean;
+}
 
 export interface LlmClient {
   complete(req: LlmCompletionRequest): Promise<LlmCompletionResponse>;
 }
 
 const DEFAULT_BASE = "https://openrouter.ai/api/v1";
+
+/** Default retry backoff delays in milliseconds for 429 responses */
+export const DEFAULT_RETRY_DELAYS = [15_000, 60_000, 180_000];
+
+export type RetryConfig = {
+  /** Array of delay times in ms for each retry attempt (default: [15000, 60000, 180000]) */
+  delays?: number[];
+  /** Function to call before each retry to check budget/cap. Throw to abort retry. */
+  preRetryCheck?: () => Promise<void> | void;
+  /** Custom sleep function for testing (defaults to real setTimeout-based sleep) */
+  sleep?: (ms: number) => Promise<void>;
+};
 
 export type OpenRouterClientOptions = {
   apiKey?: string;
@@ -43,9 +63,58 @@ export type OpenRouterClientOptions = {
   maxTokens?: number;
   /** Enable cache breakpoint (cache_control ephemeral on system message). */
   cacheBreakpoint?: boolean;
+  /** Retry configuration for 429 rate limit responses */
+  retryConfig?: RetryConfig;
+  /** Supported parameters cache - set by matrix runner after fetching /models */
+  supportedParameters?: Map<string, Set<string>>;
+  /** Callback when parameters are dropped from request */
+  onDroppedParameters?: (model: string, dropped: string[]) => void;
 };
 
 const DEFAULT_MAX_TOKENS = 512;
+
+/** Error class for provider errors (200 with error object, empty choices, missing usage) */
+export class ProviderError extends Error {
+  readonly code?: string;
+  readonly type?: string;
+  readonly isRateLimited: boolean = false;
+
+  constructor(message: string, opts?: { code?: string; type?: string }) {
+    super(message);
+    this.name = "ProviderError";
+    this.code = opts?.code;
+    this.type = opts?.type;
+  }
+}
+
+/** Error class for rate limit exhaustion (all retries failed) */
+export class RateLimitExhaustedError extends Error {
+  readonly retries: number;
+  readonly model: string;
+
+  constructor(model: string, retries: number) {
+    super(`Rate limit exhausted for ${model} after ${retries} retries`);
+    this.name = "RateLimitExhaustedError";
+    this.retries = retries;
+    this.model = model;
+  }
+}
+
+/** Parse RETRY_DELAYS_MS (comma-separated ms, e.g. "15000,60000,180000"); undefined if unset/invalid.
+ * Rejects empty pieces like "1,,2" or trailing commas. */
+export function parseRetryDelaysEnv(raw: string | undefined): number[] | undefined {
+  if (!raw) return undefined;
+  const pieces = raw.split(",");
+  if (pieces.length === 0 || pieces.some((p) => p.trim() === "")) return undefined;
+  const parts = pieces.map((p) => Number(p.trim()));
+  if (parts.some((n) => !Number.isFinite(n) || n < 0)) return undefined;
+  return parts;
+}
+
+/** Default sleep using setTimeout */
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export class OpenRouterClient implements LlmClient {
   private readonly apiKey: string | undefined;
@@ -54,6 +123,11 @@ export class OpenRouterClient implements LlmClient {
   private readonly dryRun: boolean;
   private readonly defaultMaxTokens: number;
   private readonly cacheBreakpoint: boolean;
+  private readonly retryDelays: number[];
+  private readonly preRetryCheck?: () => Promise<void> | void;
+  private readonly sleep: (ms: number) => Promise<void>;
+  private readonly supportedParameters?: Map<string, Set<string>>;
+  private readonly onDroppedParameters?: (model: string, dropped: string[]) => void;
 
   constructor(opts: OpenRouterClientOptions = {}) {
     this.apiKey = opts.apiKey ?? process.env.OPENROUTER_API_KEY;
@@ -70,6 +144,13 @@ export class OpenRouterClient implements LlmClient {
 
     this.cacheBreakpoint =
       opts.cacheBreakpoint ?? getCacheBreakpointEnabled().enabled;
+
+    this.retryDelays =
+      opts.retryConfig?.delays ?? parseRetryDelaysEnv(process.env.RETRY_DELAYS_MS) ?? DEFAULT_RETRY_DELAYS;
+    this.preRetryCheck = opts.retryConfig?.preRetryCheck;
+    this.sleep = opts.retryConfig?.sleep ?? defaultSleep;
+    this.supportedParameters = opts.supportedParameters;
+    this.onDroppedParameters = opts.onDroppedParameters;
   }
 
   get modelId(): string {
@@ -95,7 +176,41 @@ export class OpenRouterClient implements LlmClient {
       throw new Error("OPENROUTER_API_KEY is required for live LLM calls");
     }
 
-    return this.doRequest(req, model, this.cacheBreakpoint);
+    return this.doRequestWithRetry(req, model, this.cacheBreakpoint);
+  }
+
+  private async doRequestWithRetry(
+    req: LlmCompletionRequest,
+    model: string,
+    useCacheBreakpoint: boolean,
+  ): Promise<LlmCompletionResponse> {
+    let retries = 0;
+
+    while (true) {
+      try {
+        const result = await this.doRequest(req, model, useCacheBreakpoint);
+        if (retries > 0) {
+          result._meta = { ...result._meta, retries };
+        }
+        return result;
+      } catch (err) {
+        if (err instanceof Error && err.message.includes("HTTP 429")) {
+          if (retries >= this.retryDelays.length) {
+            throw new RateLimitExhaustedError(model, retries);
+          }
+
+          if (this.preRetryCheck) {
+            await this.preRetryCheck();
+          }
+
+          const delay = this.retryDelays[retries];
+          await this.sleep(delay);
+          retries++;
+          continue;
+        }
+        throw err;
+      }
+    }
   }
 
   private async doRequest(
@@ -125,12 +240,14 @@ export class OpenRouterClient implements LlmClient {
       return { ...base, content: m.content };
     };
 
-    const body = {
+    const rawBody: Record<string, unknown> = {
       model,
       messages: req.messages.map(formatMessage),
       temperature: req.temperature ?? 0,
       max_tokens: req.maxTokens ?? this.defaultMaxTokens,
     };
+
+    const { body, droppedParameters, temperatureSent } = this.filterParameters(rawBody, model);
 
     const res = await fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
@@ -145,13 +262,14 @@ export class OpenRouterClient implements LlmClient {
 
     if (!res.ok) {
       const text = await res.text();
-      if (useCacheBreakpoint) {
+      if (useCacheBreakpoint && res.status !== 429) {
         return this.doRequest(req, model, false);
       }
       throw new Error(`OpenRouter HTTP ${res.status}: ${text.slice(0, 500)}`);
     }
 
     const json = (await res.json()) as {
+      error?: { code?: string; type?: string; message?: string };
       choices?: Array<{ message?: { content?: string } }>;
       model?: string;
       usage?: {
@@ -165,19 +283,73 @@ export class OpenRouterClient implements LlmClient {
       };
     };
 
-    const content = json.choices?.[0]?.message?.content ?? "";
+    if (json.error) {
+      throw new ProviderError(
+        `provider_error: ${json.error.code ?? json.error.type ?? "unknown"}`,
+        { code: json.error.code, type: json.error.type }
+      );
+    }
+
+    if (!json.choices || json.choices.length === 0) {
+      throw new ProviderError("provider_error: empty_choices", { code: "empty_choices" });
+    }
+
+    if (!json.usage) {
+      throw new ProviderError("provider_error: missing_usage", { code: "missing_usage" });
+    }
+
+    const content = json.choices[0]?.message?.content ?? "";
     const cachedTokens = parseCachedTokens(json.usage);
+
+    const _meta: LlmCallMeta = { temperatureSent };
+    if (droppedParameters.length > 0) {
+      _meta.droppedParameters = droppedParameters;
+      this.onDroppedParameters?.(model, droppedParameters);
+    }
 
     return {
       content,
       model: json.model ?? model,
       usage: {
-        promptTokens: json.usage?.prompt_tokens,
-        completionTokens: json.usage?.completion_tokens,
+        promptTokens: json.usage.prompt_tokens,
+        completionTokens: json.usage.completion_tokens,
         ...(cachedTokens !== undefined ? { cachedTokens } : {}),
       },
       raw: json,
+      _meta,
     };
+  }
+
+  private filterParameters(
+    body: Record<string, unknown>,
+    model: string,
+  ): { body: Record<string, unknown>; droppedParameters: string[]; temperatureSent: boolean } {
+    const hasTemperature = "temperature" in body;
+
+    if (!this.supportedParameters) {
+      return { body, droppedParameters: [], temperatureSent: hasTemperature };
+    }
+
+    const supported = this.supportedParameters.get(model);
+    if (!supported || supported.size === 0) {
+      return { body, droppedParameters: [], temperatureSent: hasTemperature };
+    }
+
+    const droppedParameters: string[] = [];
+    const filtered: Record<string, unknown> = {};
+
+    for (const [key, value] of Object.entries(body)) {
+      if (key === "model" || key === "messages" || key === "max_tokens") {
+        filtered[key] = value;
+      } else if (supported.has(key)) {
+        filtered[key] = value;
+      } else {
+        droppedParameters.push(key);
+      }
+    }
+
+    const temperatureSent = "temperature" in filtered;
+    return { body: filtered, droppedParameters, temperatureSent };
   }
 }
 

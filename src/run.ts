@@ -11,8 +11,9 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReactAgent } from "./agent/react.js";
-import { createLlmClient, OpenRouterClient } from "./llm/index.js";
+import { createLlmClient, OpenRouterClient, parseRetryDelaysEnv } from "./llm/index.js";
 import { PROJECT_NAME } from "./name.js";
+import { fetchModelPricesWithParams } from "./matrix/prices.js";
 import {
   createDefaultMcpClient,
   InProcessMcpClient,
@@ -71,6 +72,7 @@ interface RunOneTaskOpts {
   suite: string;
   toolsFactory?: () => McpToolClient;
   maxSteps?: number;
+  supportedParameters?: Map<string, Set<string>>;
   maxObservationChars?: number;
 }
 
@@ -79,7 +81,9 @@ async function runOneTask(
   opts: RunOneTaskOpts,
 ): Promise<TaskOutcome> {
   const tools = opts.toolsFactory ? opts.toolsFactory() : createDefaultMcpClient();
-  const llm = createLlmClient();
+  const llm = createLlmClient(
+    opts.supportedParameters ? { supportedParameters: opts.supportedParameters } : undefined,
+  );
   const agentLog: unknown[] = [];
 
   let finalAnswer: string;
@@ -210,6 +214,15 @@ async function main(): Promise<void> {
     runPreflight();
   }
 
+  const retryDelaysRaw = process.env.RETRY_DELAYS_MS;
+  if (retryDelaysRaw !== undefined && retryDelaysRaw !== "") {
+    const parsed = parseRetryDelaysEnv(retryDelaysRaw);
+    if (!parsed) {
+      console.error(`Error: RETRY_DELAYS_MS is invalid (must be comma-separated positive integers, no empty pieces).`);
+      process.exit(1);
+    }
+  }
+
   const tasks = args.taskId
     ? allTasks.filter((t) => t.id === args.taskId)
     : allTasks;
@@ -245,6 +258,21 @@ async function main(): Promise<void> {
   console.log(`mode=${mode} tasks=${tasks.length}`);
   console.log("---");
 
+  // Live only: fetch supported_parameters once per run. On failure behaviour is unchanged (no filter).
+  let supportedParameters: Map<string, Set<string>> | undefined;
+  let parametersFetched: boolean | null = null;
+  if (mode === "live") {
+    const liveModel = new OpenRouterClient().modelId;
+    const base = (process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1").replace(/\/$/, "");
+    try {
+      const p = await fetchModelPricesWithParams([liveModel], `${base}/models`);
+      parametersFetched = p.parametersFetched;
+      supportedParameters = p.parametersFetched ? p.supportedParameters : undefined;
+    } catch {
+      parametersFetched = false;
+    }
+  }
+
   const outcomes: TaskOutcome[] = [];
   for (const task of tasks) {
     const maxSteps = suiteVersion === "0.2.0" ? getV2TaskMaxSteps(task.id) : 8;
@@ -255,6 +283,7 @@ async function main(): Promise<void> {
       toolsFactory,
       maxSteps,
       maxObservationChars,
+      supportedParameters,
     });
     outcomes.push(outcome);
     const mark = outcome.pass ? "PASS" : "FAIL";
@@ -273,6 +302,7 @@ async function main(): Promise<void> {
         suiteVersion,
         versionSource: getSuiteVersionPath(),
         mode,
+        parametersFetched,
         passed,
         total,
         score: `${passed}/${total}`,

@@ -14,16 +14,31 @@ interface OpenRouterModel {
     prompt?: string;
     completion?: string;
   };
+  supported_parameters?: string[];
 }
 
 interface OpenRouterModelsResponse {
   data: OpenRouterModel[];
 }
 
+export interface PriceDataWithParams extends PriceData {
+  supportedParameters: Map<string, Set<string>>;
+  parametersFetched: boolean;
+}
+
 export async function fetchModelPrices(
   requestedModels: string[],
 ): Promise<PriceData> {
-  const response = await fetch(OPENROUTER_MODELS_URL);
+  const result = await fetchModelPricesWithParams(requestedModels);
+  return { fetchedAt: result.fetchedAt, models: result.models };
+}
+
+export async function fetchModelPricesWithParams(
+  requestedModels: string[],
+  modelsUrl: string = OPENROUTER_MODELS_URL,
+): Promise<PriceDataWithParams> {
+  // Public endpoint: no Authorization header is sent.
+  const response = await fetch(modelsUrl);
 
   if (!response.ok) {
     throw new Error(
@@ -35,6 +50,8 @@ export async function fetchModelPrices(
   const fetchedAt = new Date().toISOString();
 
   const models = new Map<string, ModelPricing>();
+  const supportedParameters = new Map<string, Set<string>>();
+  let parametersFetched = false;
 
   for (const model of json.data) {
     if (!requestedModels.includes(model.id)) {
@@ -55,9 +72,14 @@ export async function fetchModelPrices(
         completionPrice,
       });
     }
+
+    if (model.supported_parameters && Array.isArray(model.supported_parameters) && model.supported_parameters.length > 0) {
+      supportedParameters.set(model.id, new Set(model.supported_parameters));
+      parametersFetched = true;
+    }
   }
 
-  return { fetchedAt, models };
+  return { fetchedAt, models, supportedParameters, parametersFetched };
 }
 
 export function sortModelsByCost(
@@ -201,12 +223,22 @@ export function calculateModelFullWorstCase(
   return runs * calculateWorstCaseCost(callsPerRun, iMax, outputTokens, pricing);
 }
 
+/** Calculate worst case using per-run call count (for per-task maxSteps support) */
+export function calculateModelFullWorstCaseWithCallsPerRun(
+  runs: number,
+  callsPerRun: number,
+  iMax: number,
+  pricing: ModelPricing,
+): number {
+  const outputTokens = 512;
+  return runs * calculateWorstCaseCost(callsPerRun, iMax, outputTokens, pricing);
+}
+
 export function sortModelsByFullWorstCase(
   models: string[],
   priceData: PriceData,
   runs: number,
-  taskCount: number,
-  maxSteps: number,
+  callsPerRun: number,
   iMax: number,
 ): string[] {
   return [...models].sort((a, b) => {
@@ -217,8 +249,8 @@ export function sortModelsByFullWorstCase(
     if (!priceA) return 1;
     if (!priceB) return -1;
 
-    const costA = calculateModelFullWorstCase(runs, taskCount, maxSteps, iMax, priceA);
-    const costB = calculateModelFullWorstCase(runs, taskCount, maxSteps, iMax, priceB);
+    const costA = calculateModelFullWorstCaseWithCallsPerRun(runs, callsPerRun, iMax, priceA);
+    const costB = calculateModelFullWorstCaseWithCallsPerRun(runs, callsPerRun, iMax, priceB);
 
     return costA - costB;
   });

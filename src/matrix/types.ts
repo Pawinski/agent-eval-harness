@@ -16,9 +16,11 @@ export type AbortReason =
   | "prompt_tokens_exceeded"
   | "http_errors"
   | "global_cap"
-  | "skipped_credit";
+  | "skipped_credit"
+  | "rate_limited"
+  | "provider_error";
 
-export type SkipReason = "credit" | "cap";
+export type SkipReason = "credit" | "cap" | "rate_limited";
 
 export interface SkippedModel {
   model: string;
@@ -26,6 +28,7 @@ export interface SkippedModel {
   remaining: number;
   shortfall: number;
   reason: SkipReason;
+  retries?: number;
 }
 
 export class MatrixAbort extends Error {
@@ -60,6 +63,18 @@ export function getSuiteTasksV2(version: string): SuiteTaskV2[] {
     return TASKS_V2;
   }
   throw new Error(`Suite ${version} does not have v2 task metadata`);
+}
+
+/** Get total calls per run using per-task maxSteps for suite 0.2.0, or taskCount × maxSteps for other suites */
+export function getCallsPerRun(suite: string): number {
+  if (suite === "0.2.0") {
+    return TASKS_V2.reduce((sum, t) => sum + (t.maxSteps ?? 8), 0);
+  }
+  const config = SUITE_CONFIGS[suite];
+  if (!config) {
+    return 7 * 8; // fallback for 0.1.0
+  }
+  return config.taskCount * config.maxSteps;
 }
 
 export interface PriceData {
@@ -153,6 +168,10 @@ export interface CallResult {
   httpError: boolean;
   httpStatus?: number;
   errorCode?: string;
+  retries?: number;
+  droppedParameters?: string[];
+  providerError?: { code?: string; type?: string };
+  temperatureSent?: boolean;
 }
 
 export interface RunResult {
@@ -168,6 +187,11 @@ export interface RunResult {
   emptyTasks: string[];
   emptyCount: number;
   calls: CallResult[];
+  retries: number;
+  /** true/false in live runs (was supported_parameters available from /models); null in fixture mode */
+  parametersFetched: boolean | null;
+  /** true/false if every call agreed, "mixed" otherwise, null if no call recorded it */
+  temperatureSent?: boolean | "mixed" | null;
 }
 
 export interface MatrixResult {

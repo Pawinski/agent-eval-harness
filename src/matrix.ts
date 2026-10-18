@@ -12,12 +12,14 @@ import { realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { PROJECT_NAME } from "./name.js";
+import { parseRetryDelaysEnv } from "./llm/index.js";
 import { runPreflight } from "./mcp/index.js";
 import {
-  fetchModelPrices,
+  fetchModelPricesWithParams,
   validatePricesForModels,
   createFixturePrices,
   sortModelsByFullWorstCase,
+  calculateModelFullWorstCaseWithCallsPerRun,
   runMatrix,
   getGitSha7,
   getTodayDate,
@@ -35,6 +37,7 @@ import {
   SUITE_CONFIGS,
   getDefaultCapUsd,
   getSuiteTasks,
+  getCallsPerRun,
   MAX_COMPLETION_TOKENS,
   type RunResult,
   type PriceData,
@@ -166,15 +169,17 @@ Examples:
 
 function formatSummaryTable(runs: RunResult[]): string {
   const lines: string[] = [];
-  lines.push("| Model | Run | Pass/N | Tokens In | Tokens Out | Cached | Cost USD | Empty | Abort |");
-  lines.push("|-------|-----|--------|-----------|------------|--------|----------|-------|-------|");
+  lines.push("| Model | Run | Pass/N | Tokens In | Tokens Out | Cached | Cost USD | Empty | Abort | Temp sent |");
+  lines.push("|-------|-----|--------|-----------|------------|--------|----------|-------|-------|-----------|");
 
   for (const run of runs) {
     const empty = run.emptyTasks.length > 0 ? run.emptyTasks.join(", ") : "-";
     const abort = run.abortReason ?? "-";
     const cached = run.tokensCached !== null ? String(run.tokensCached) : "-";
+    const passStr = run.abortReason ? `not scored (${run.abortReason})` : `${run.pass}/${run.total}`;
+    const temp = run.temperatureSent === true ? "yes" : run.temperatureSent === false ? "no" : run.temperatureSent === "mixed" ? "mixed" : "-";
     lines.push(
-      `| ${run.model} | ${run.runN} | ${run.pass}/${run.total} | ${run.tokensIn} | ${run.tokensOut} | ${cached} | $${run.costUsd.toFixed(6)} | ${empty} | ${abort} |`,
+      `| ${run.model} | ${run.runN} | ${passStr} | ${run.tokensIn} | ${run.tokensOut} | ${cached} | $${run.costUsd.toFixed(6)} | ${empty} | ${abort} | ${temp} |`,
     );
   }
 
@@ -190,6 +195,8 @@ interface ModelStats {
   totalOut: number;
   totalCached: number | null;
   totalEmpty: number;
+  abortedRuns: number;
+  tempSent: boolean | "mixed" | null;
 }
 
 function computeModelStats(runs: RunResult[]): Map<string, ModelStats> {
@@ -202,20 +209,29 @@ function computeModelStats(runs: RunResult[]): Map<string, ModelStats> {
 
   const stats = new Map<string, ModelStats>();
   for (const [model, modelRuns] of byModel) {
-    const passes = modelRuns.map((r) => r.pass);
-    const mean = passes.reduce((a, b) => a + b, 0) / passes.length;
-    const spread = Math.max(...passes) - Math.min(...passes);
+    const scoredRuns = modelRuns.filter((r) => !r.abortReason);
+    const abortedRuns = modelRuns.filter((r) => r.abortReason).length;
+    const passes = scoredRuns.map((r) => r.pass);
+    const mean = passes.length > 0 ? passes.reduce((a, b) => a + b, 0) / passes.length : 0;
+    const spread = passes.length > 0 ? Math.max(...passes) - Math.min(...passes) : 0;
     const totalCost = modelRuns.reduce((a, r) => a + r.costUsd, 0);
     const totalIn = modelRuns.reduce((a, r) => a + r.tokensIn, 0);
     const totalOut = modelRuns.reduce((a, r) => a + r.tokensOut, 0);
-    const totalEmpty = modelRuns.reduce((a, r) => a + r.emptyCount, 0);
+    const totalEmpty = scoredRuns.reduce((a, r) => a + r.emptyCount, 0);
     let totalCached: number | null = null;
     for (const r of modelRuns) {
       if (r.tokensCached !== null) {
         totalCached = (totalCached ?? 0) + r.tokensCached;
       }
     }
-    stats.set(model, { passes, mean, spread, totalCost, totalIn, totalOut, totalCached, totalEmpty });
+    const tempValues = new Set(modelRuns.map((r) => r.temperatureSent).filter((v): v is boolean => typeof v === "boolean"));
+    let tempSent: boolean | "mixed" | null = null;
+    if (tempValues.size === 1) {
+      tempSent = tempValues.has(true);
+    } else if (tempValues.size > 1) {
+      tempSent = "mixed";
+    }
+    stats.set(model, { passes, mean, spread, totalCost, totalIn, totalOut, totalCached, totalEmpty, abortedRuns, tempSent });
   }
 
   return stats;
@@ -229,20 +245,33 @@ function printSummaryToConsole(runs: RunResult[], suite: string, capUsd: number,
 
   const stats = computeModelStats(runs);
   console.log("\n--- Per-Model Summary ---");
-  console.log("| Model | Runs | Mean | Spread | Total In | Total Out | Cached | Empty | Total Cost | Status |");
-  console.log("|-------|------|------|--------|----------|-----------|--------|-------|------------|--------|");
+  console.log("| Model | Runs | Mean | Spread | Total In | Total Out | Cached | Empty | Total Cost | Status | Temp sent |");
+  console.log("|-------|------|------|--------|----------|-----------|--------|-------|------------|--------|-----------|");
 
   for (const [model, s] of stats) {
-    const passStr = s.passes.map((p) => `${p}/${taskCount}`).join(", ");
+    let passStr: string;
+    let meanStr: string;
+    let spreadStr: string;
+    if (s.passes.length === 0) {
+      passStr = "-";
+      meanStr = "-";
+      spreadStr = "-";
+    } else {
+      passStr = s.passes.map((p) => `${p}/${taskCount}`).join(", ");
+      meanStr = s.mean.toFixed(2);
+      spreadStr = String(s.spread);
+    }
     const cached = s.totalCached !== null ? String(s.totalCached) : "-";
+    const status = s.abortedRuns > 0 ? `${s.abortedRuns} aborted` : "-";
+    const temp = s.tempSent === true ? "yes" : s.tempSent === false ? "no" : s.tempSent === "mixed" ? "mixed" : "-";
     console.log(
-      `| ${model} | ${passStr} | ${s.mean.toFixed(2)} | ${s.spread} | ${s.totalIn} | ${s.totalOut} | ${cached} | ${s.totalEmpty} | $${s.totalCost.toFixed(6)} | - |`,
+      `| ${model} | ${passStr} | ${meanStr} | ${spreadStr} | ${s.totalIn} | ${s.totalOut} | ${cached} | ${s.totalEmpty} | $${s.totalCost.toFixed(6)} | ${status} | ${temp} |`,
     );
   }
 
   for (const skipped of skippedModels) {
     console.log(
-      `| ${skipped.model} | - | - | - | - | - | - | - | - | skipped: ${skipped.reason} |`,
+      `| ${skipped.model} | - | - | - | - | - | - | - | - | skipped: ${skipped.reason} | - |`,
     );
   }
 }
@@ -274,8 +303,10 @@ async function writeSummaryFiles(
   for (const [model, s] of stats) {
     modelSummaries[model] = {
       passes: s.passes,
-      mean: s.mean,
-      spread: s.spread,
+      // No scored runs: mean/spread are null, not 0.
+      mean: s.passes.length > 0 ? s.mean : null,
+      spread: s.passes.length > 0 ? s.spread : null,
+      abortedRuns: s.abortedRuns,
       totalCost: s.totalCost,
       totalIn: s.totalIn,
       totalOut: s.totalOut,
@@ -302,6 +333,7 @@ async function writeSummaryFiles(
       cost_usd: r.costUsd,
       empty_tasks: r.emptyTasks,
       abort_reason: r.abortReason ?? null,
+      temperature_sent: r.temperatureSent ?? null,
     })),
     modelSummaries,
     skippedModels: skippedModels.map((s) => ({
@@ -336,8 +368,20 @@ async function writeSummaryFiles(
   mdLines.push("|-------|------|------|--------|------------|--------|");
 
   for (const [model, s] of stats) {
-    const passStr = s.passes.map((p) => `${p}/${taskCount}`).join(", ");
-    mdLines.push(`| ${model} | ${passStr} | ${s.mean.toFixed(2)} | ${s.spread} | $${s.totalCost.toFixed(6)} | - |`);
+    let passStr: string;
+    let meanStr: string;
+    let spreadStr: string;
+    if (s.passes.length === 0) {
+      passStr = "-";
+      meanStr = "-";
+      spreadStr = "-";
+    } else {
+      passStr = s.passes.map((p) => `${p}/${taskCount}`).join(", ");
+      meanStr = s.mean.toFixed(2);
+      spreadStr = String(s.spread);
+    }
+    const status = s.abortedRuns > 0 ? `${s.abortedRuns} aborted` : "-";
+    mdLines.push(`| ${model} | ${passStr} | ${meanStr} | ${spreadStr} | $${s.totalCost.toFixed(6)} | ${status} |`);
   }
 
   for (const skipped of skippedModels) {
@@ -399,6 +443,15 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
     return 1;
   }
 
+  const retryDelaysRaw = env.RETRY_DELAYS_MS;
+  if (retryDelaysRaw !== undefined && retryDelaysRaw !== "") {
+    const parsed = parseRetryDelaysEnv(retryDelaysRaw);
+    if (!parsed) {
+      console.error(`Error: RETRY_DELAYS_MS is invalid (must be comma-separated positive integers, no empty pieces).`);
+      return 1;
+    }
+  }
+
   let tasks;
   try {
     tasks = getSuiteTasks(args.suite);
@@ -457,8 +510,9 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
     priceData = deps.priceData;
   } else {
     console.log("Fetching model prices from OpenRouter...");
+    const base = (env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1").replace(/\/$/, "");
     try {
-      priceData = await fetchModelPrices(args.models);
+      priceData = await fetchModelPricesWithParams(args.models, `${base}/models`);
     } catch (err) {
       const redacted = redactError(err);
       console.error(`Error fetching prices: ${redacted.message}`);
@@ -478,16 +532,23 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
   const suiteConfig = SUITE_CONFIGS[args.suite] ?? { maxSteps: 8 };
   const maxSteps = suiteConfig.maxSteps;
   const iMax = getDefaultIMax(args.suite, maxSteps);
+  const callsPerRun = getCallsPerRun(args.suite);
 
   const sortedModels = sortModelsByFullWorstCase(
     args.models,
     priceData,
     args.runs,
-    tasks.length,
-    maxSteps,
+    callsPerRun,
     iMax,
   );
   console.log(`Running models (ascending worst-case): ${sortedModels.join(", ")}`);
+  const worstCaseLine = sortedModels
+    .map((m) => {
+      const pricing = priceData.models.get(m);
+      return pricing ? `${m} $${calculateModelFullWorstCaseWithCallsPerRun(args.runs, callsPerRun, iMax, pricing).toFixed(2)}` : `${m} n/a`;
+    })
+    .join(", ");
+  console.log(`Worst case per model (${args.runs} runs x ${callsPerRun} calls): ${worstCaseLine}`);
 
   let creditProvider: CreditProvider | undefined;
   let initialCredit: number | null = null;
@@ -569,7 +630,11 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
       onModelAbort: (model, reason) => {
         console.log(`Model aborted: ${model} - ${reason}`);
       },
-      onModelSkipped: (model, worstCase, remaining, shortfall, reason) => {
+      onModelSkipped: (model, worstCase, remaining, shortfall, reason, retries) => {
+        if (reason === "rate_limited") {
+          console.log(`Skipped (rate_limited): ${model} after ${retries ?? 0} retries`);
+          return;
+        }
         console.log(`Skipped (${reason}): ${model} (worst case $${worstCase.toFixed(4)} > remaining $${remaining.toFixed(4)}, shortfall $${shortfall.toFixed(4)})`);
       },
       onGlobalAbort: () => {
@@ -588,11 +653,15 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
   if (skippedModels.length > 0) {
     console.log("\n--- Skipped Models ---");
     for (const skipped of skippedModels) {
-      console.log(`  ${skipped.model} (skipped: ${skipped.reason}): worst case $${skipped.worstCase.toFixed(4)}, remaining $${skipped.remaining.toFixed(4)}`);
+      const retryNote = skipped.retries !== undefined ? `, retries ${skipped.retries}` : "";
+      const remainingLabel = skipped.reason === "credit" ? "credit" : "cap";
+      console.log(`  ${skipped.model} (skipped: ${skipped.reason}): worst case $${skipped.worstCase.toFixed(4)}, ${remainingLabel} $${skipped.remaining.toFixed(4)}${retryNote}`);
     }
     const parts: string[] = [];
     if (creditTopUp > 0) parts.push(`credit top-up $${creditTopUp.toFixed(2)}`);
     if (capShortfall > 0) parts.push(`cap shortfall $${capShortfall.toFixed(2)}`);
+    const skippedRetries = skippedModels.reduce((n, s) => n + (s.retries ?? 0), 0);
+    if (skippedModels.some((s) => s.reason === "rate_limited")) parts.push(`retries ${skippedRetries}`);
     console.log(`\nSKIPPED: ${skippedModels.length} model(s), ${parts.join(" / ") || "no shortfall"}`);
   }
 
