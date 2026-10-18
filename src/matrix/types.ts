@@ -83,10 +83,10 @@ export function getDefaultMaxInputTokens(maxSteps: number): number {
 
 export function getDefaultIMax(suiteVersion: string, maxSteps: number): number {
   if (suiteVersion === "0.1.0") {
-    return 2410;
+    return 3000;
   }
   if (maxSteps === 12) {
-    return 3750;
+    return 4700;
   }
   return 3750;
 }
@@ -116,6 +116,8 @@ export interface CallResult {
   usage: CallUsage;
   empty: boolean;
   httpError: boolean;
+  httpStatus?: number;
+  errorCode?: string;
 }
 
 export interface RunResult {
@@ -129,6 +131,7 @@ export interface RunResult {
   costUsd: number;
   abortReason?: AbortReason;
   emptyTasks: string[];
+  emptyCount: number;
   calls: CallResult[];
 }
 

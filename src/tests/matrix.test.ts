@@ -8,6 +8,8 @@ import {
   validatePricesForModels,
   createFixturePrices,
   sortModelsByCost,
+  checkGitStatus,
+  getResultsDir,
   type ModelPricing,
   type PriceData,
   getDefaultCapUsd,
@@ -27,6 +29,7 @@ import {
   redactError,
   safeStringify,
 } from "../matrix/redact.js";
+import { parseArgs } from "../matrix.js";
 import type { LlmClient, LlmCompletionResponse } from "../llm/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -62,12 +65,12 @@ describe("cost math", () => {
 
   it("uses correct I_max for 0.1.0", () => {
     const iMax = getDefaultIMax("0.1.0", 8);
-    expect(iMax).toBe(2410);
+    expect(iMax).toBe(3000);
   });
 
-  it("uses 3750 for maxSteps 12 suites", () => {
+  it("uses 4700 for maxSteps 12 suites", () => {
     const iMax = getDefaultIMax("0.2.0", 12);
-    expect(iMax).toBe(3750);
+    expect(iMax).toBe(4700);
   });
 });
 
@@ -143,12 +146,12 @@ describe("suite tasks", () => {
     expect(() => getSuiteTasks("unknown")).toThrow("Unknown suite version");
   });
 
-  it("getDefaultIMax returns 2410 for 0.1.0", () => {
-    expect(getDefaultIMax("0.1.0", 8)).toBe(2410);
+  it("getDefaultIMax returns 3000 for 0.1.0", () => {
+    expect(getDefaultIMax("0.1.0", 8)).toBe(3000);
   });
 
-  it("getDefaultIMax returns 3750 for maxSteps 12", () => {
-    expect(getDefaultIMax("0.2.0", 12)).toBe(3750);
+  it("getDefaultIMax returns 4700 for maxSteps 12", () => {
+    expect(getDefaultIMax("0.2.0", 12)).toBe(4700);
   });
 });
 
@@ -618,5 +621,256 @@ describe("redaction never leaks to files", () => {
     expect(content).not.toContain(FAKE_KEY);
     expect(content).not.toContain("SECRET123");
     expect(content).toContain("[REDACTED]");
+  });
+});
+
+describe("CLI argument validation", () => {
+  describe("--cap-usd validation", () => {
+    it("accepts valid positive cap", () => {
+      const args = parseArgs(["--cap-usd", "10"]);
+      expect(args.errors).toEqual([]);
+      expect(args.capUsd).toBe(10);
+    });
+
+    it("accepts valid decimal cap", () => {
+      const args = parseArgs(["--cap-usd", "5.5"]);
+      expect(args.errors).toEqual([]);
+      expect(args.capUsd).toBe(5.5);
+    });
+
+    it("rejects NaN for --cap-usd", () => {
+      const args = parseArgs(["--cap-usd", "abc"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("--cap-usd");
+      expect(args.errors[0]).toContain("finite number");
+    });
+
+    it("rejects missing value for --cap-usd", () => {
+      const args = parseArgs(["--cap-usd"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("--cap-usd requires a value");
+    });
+
+    it("rejects missing value when another flag follows", () => {
+      const args = parseArgs(["--cap-usd", "--fixture"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("--cap-usd requires a value");
+    });
+
+    it("rejects zero for --cap-usd", () => {
+      const args = parseArgs(["--cap-usd", "0"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("--cap-usd");
+      expect(args.errors[0]).toContain("greater than 0");
+    });
+
+    it("rejects negative for --cap-usd", () => {
+      const args = parseArgs(["--cap-usd", "-5"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("--cap-usd requires a value");
+    });
+  });
+
+  describe("--runs validation", () => {
+    it("accepts valid integer runs", () => {
+      const args = parseArgs(["--runs", "3"]);
+      expect(args.errors).toEqual([]);
+      expect(args.runs).toBe(3);
+    });
+
+    it("rejects NaN for --runs", () => {
+      const args = parseArgs(["--runs", "abc"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("--runs");
+      expect(args.errors[0]).toContain("integer");
+    });
+
+    it("rejects missing value for --runs", () => {
+      const args = parseArgs(["--runs"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("--runs requires a value");
+    });
+
+    it("rejects zero for --runs", () => {
+      const args = parseArgs(["--runs", "0"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("--runs");
+      expect(args.errors[0]).toContain("at least 1");
+    });
+
+    it("rejects negative for --runs", () => {
+      const args = parseArgs(["--runs", "-1"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("--runs requires a value");
+    });
+
+    it("rejects non-integer for --runs", () => {
+      const args = parseArgs(["--runs", "2.5"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("--runs");
+      expect(args.errors[0]).toContain("integer");
+    });
+  });
+
+  describe("combined arguments", () => {
+    it("parses fixture mode correctly", () => {
+      const args = parseArgs(["--fixture"]);
+      expect(args.errors).toEqual([]);
+      expect(args.fixture).toBe(true);
+    });
+
+    it("parses short flags correctly", () => {
+      const args = parseArgs(["-f", "-r", "5", "-c", "20"]);
+      expect(args.errors).toEqual([]);
+      expect(args.fixture).toBe(true);
+      expect(args.runs).toBe(5);
+      expect(args.capUsd).toBe(20);
+    });
+  });
+});
+
+describe("git status validation", () => {
+  it("checkGitStatus returns sha and isDirty", () => {
+    const status = checkGitStatus();
+    expect(typeof status.sha).toBe("string");
+    expect(typeof status.isDirty).toBe("boolean");
+  });
+
+  it("returns full 40-char SHA", () => {
+    const status = checkGitStatus();
+    if (!status.error) {
+      expect(status.sha.length).toBe(40);
+      expect(/^[0-9a-f]+$/.test(status.sha)).toBe(true);
+    }
+  });
+});
+
+describe("results directory", () => {
+  it("getResultsDir returns results/ for live mode", () => {
+    const dir = getResultsDir(false);
+    expect(dir).toContain("results");
+    expect(dir).not.toContain("results-fixture");
+  });
+
+  it("getResultsDir returns results-fixture/ for fixture mode", () => {
+    const dir = getResultsDir(true);
+    expect(dir).toContain("results-fixture");
+  });
+});
+
+describe("empty response tracking", () => {
+  const pricing: ModelPricing = {
+    modelId: "test/model",
+    promptPrice: 0.001,
+    completionPrice: 0.001,
+  };
+
+  function createEmptyMockLlm(): LlmClient & { callCount: number } {
+    return {
+      callCount: 0,
+      async complete(): Promise<LlmCompletionResponse> {
+        this.callCount++;
+        return {
+          content: "",
+          model: "mock",
+          usage: {
+            promptTokens: 100,
+            completionTokens: 50,
+          },
+        };
+      },
+    };
+  }
+
+  it("flags empty content as empty in onCall", async () => {
+    const mockLlm = createEmptyMockLlm();
+    let receivedEmpty = false;
+
+    const wrappedLlm = new MatrixLlmClient(mockLlm, {
+      pricing,
+      maxInputTokens: 3000,
+      iMax: 3000,
+      globalCapUsd: 100,
+      worstCasePerRun: 100,
+      getCumulativeCost: () => 0,
+      getRunCostSoFar: () => 0,
+      getTaskCostSoFar: () => 0,
+      onCall: (usage) => {
+        receivedEmpty = usage.empty;
+      },
+    });
+
+    await wrappedLlm.complete({ messages: [] });
+    expect(receivedEmpty).toBe(true);
+  });
+
+  it("does not flag non-empty content as empty", async () => {
+    const mockLlm: LlmClient & { callCount: number } = {
+      callCount: 0,
+      async complete(): Promise<LlmCompletionResponse> {
+        this.callCount++;
+        return {
+          content: "valid response",
+          model: "mock",
+          usage: {
+            promptTokens: 100,
+            completionTokens: 50,
+          },
+        };
+      },
+    };
+    let receivedEmpty = false;
+
+    const wrappedLlm = new MatrixLlmClient(mockLlm, {
+      pricing,
+      maxInputTokens: 3000,
+      iMax: 3000,
+      globalCapUsd: 100,
+      worstCasePerRun: 100,
+      getCumulativeCost: () => 0,
+      getRunCostSoFar: () => 0,
+      getTaskCostSoFar: () => 0,
+      onCall: (usage) => {
+        receivedEmpty = usage.empty;
+      },
+    });
+
+    await wrappedLlm.complete({ messages: [] });
+    expect(receivedEmpty).toBe(false);
+  });
+
+  it("flags whitespace-only content as empty", async () => {
+    const mockLlm: LlmClient & { callCount: number } = {
+      callCount: 0,
+      async complete(): Promise<LlmCompletionResponse> {
+        this.callCount++;
+        return {
+          content: "   \n\t  ",
+          model: "mock",
+          usage: {
+            promptTokens: 100,
+            completionTokens: 50,
+          },
+        };
+      },
+    };
+    let receivedEmpty = false;
+
+    const wrappedLlm = new MatrixLlmClient(mockLlm, {
+      pricing,
+      maxInputTokens: 3000,
+      iMax: 3000,
+      globalCapUsd: 100,
+      worstCasePerRun: 100,
+      getCumulativeCost: () => 0,
+      getRunCostSoFar: () => 0,
+      getTaskCostSoFar: () => 0,
+      onCall: (usage) => {
+        receivedEmpty = usage.empty;
+      },
+    });
+
+    await wrappedLlm.complete({ messages: [] });
+    expect(receivedEmpty).toBe(true);
   });
 });

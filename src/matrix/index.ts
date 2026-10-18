@@ -17,10 +17,13 @@ export {
   getGitSha7,
   sanitizeModelId,
   getTodayDate,
+  getResultsDir,
+  checkGitStatus,
   MAX_COMPLETION_TOKENS,
   MatrixLlmClient,
   type MatrixLlmClientConfig,
   type MatrixRunnerCallbacks,
+  type GitStatus,
 } from "./runner.js";
 
 export {

@@ -38,19 +38,60 @@ import { safeStringify } from "./redact.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "../..");
 const RESULTS_DIR = path.join(ROOT, "results");
+const RESULTS_FIXTURE_DIR = path.join(ROOT, "results-fixture");
 
 export const MAX_COMPLETION_TOKENS = 512;
 
-export function getGitSha(): string {
+export interface GitStatus {
+  sha: string;
+  isDirty: boolean;
+  error?: string;
+}
+
+export function checkGitStatus(): GitStatus {
+  let sha: string;
   try {
-    return execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
+    sha = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
   } catch {
-    return "0000000000000000000000000000000000000000";
+    return { sha: "", isDirty: true, error: "git rev-parse HEAD failed" };
   }
+
+  try {
+    const status = execSync("git status --porcelain", { encoding: "utf8" });
+    const lines = status.split("\n").filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return false;
+      if (trimmed.startsWith("?? results/")) return false;
+      if (trimmed.startsWith("?? results-fixture/")) return false;
+      if (trimmed.includes(" results/")) return false;
+      if (trimmed.includes(" results-fixture/")) return false;
+      return true;
+    });
+    return { sha, isDirty: lines.length > 0 };
+  } catch {
+    return { sha, isDirty: true, error: "git status --porcelain failed" };
+  }
+}
+
+export function getGitSha(): string {
+  const status = checkGitStatus();
+  return status.sha || "0000000000000000000000000000000000000000";
 }
 
 export function getGitSha7(): string {
   return getGitSha().slice(0, 7);
+}
+
+export function getResultsDir(fixture: boolean): string {
+  return fixture ? RESULTS_FIXTURE_DIR : RESULTS_DIR;
+}
+
+function isEmptyContent(content: string): boolean {
+  return !content || !content.trim();
+}
+
+function isMaxStepsExceeded(answer: string): boolean {
+  return answer === "(max steps exceeded)";
 }
 
 export function sanitizeModelId(modelId: string): string {
@@ -89,10 +130,6 @@ interface RunContext {
   fixture: boolean;
 }
 
-function isEmptyAnswer(answer: string): boolean {
-  return !answer || !answer.trim();
-}
-
 export interface MatrixLlmClientConfig {
   pricing: ModelPricing;
   maxInputTokens: number;
@@ -107,6 +144,7 @@ export interface MatrixLlmClientConfig {
     completionTokens: number;
     cachedTokens: number | null;
     costUsd: number;
+    empty: boolean;
   }) => void;
 }
 
@@ -149,8 +187,9 @@ export class MatrixLlmClient implements LlmClient {
     const completionTokens = result.usage?.completionTokens ?? 0;
     const cachedTokens = result.usage?.cachedTokens ?? null;
     const costUsd = calculateCallCost(promptTokens, completionTokens, pricing);
+    const empty = isEmptyContent(result.content);
 
-    this.config.onCall({ promptTokens, completionTokens, cachedTokens, costUsd });
+    this.config.onCall({ promptTokens, completionTokens, cachedTokens, costUsd, empty });
 
     if (completionTokens > MAX_COMPLETION_TOKENS) {
       throw new MatrixAbort("completion_tokens_exceeded", `Completion tokens exceeded: ${completionTokens} > ${MAX_COMPLETION_TOKENS}`);
@@ -176,7 +215,10 @@ async function runOneTaskWithTracking(
   let tokensCached: number | null = null;
   let costUsd = 0;
   let hadHttpError = false;
+  let httpStatus: number | undefined;
+  let errorCode: string | undefined;
   let abortReason: AbortReason | undefined;
+  let allCallsEmpty = true;
 
   const worstCasePerRun = calculateWorstCaseCost(
     taskCount * ctx.maxSteps,
@@ -188,6 +230,7 @@ async function runOneTaskWithTracking(
   if (ctx.fixture) {
     const fixtureAnswer = task.fixtureAnswer ?? "";
     const check = runCheck(fixtureAnswer, 0, task.check);
+    const isEmpty = isEmptyContent(fixtureAnswer);
     return {
       taskId: task.id,
       pass: check.pass,
@@ -198,14 +241,14 @@ async function runOneTaskWithTracking(
       tokensOut: 0,
       tokensCached: null,
       costUsd: 0,
-      empty: isEmptyAnswer(fixtureAnswer),
+      empty: isEmpty,
       hadHttpError: false,
       calls: [],
     };
   }
 
   const tools = createDefaultMcpClient();
-  const baseLlm = createLlmClient({ defaultModel: ctx.model });
+  const baseLlm = createLlmClient({ defaultModel: ctx.model, maxTokens: MAX_COMPLETION_TOKENS });
   const agentLog: unknown[] = [];
 
   let callStep = 0;
@@ -227,6 +270,10 @@ async function runOneTaskWithTracking(
       }
       costUsd += usage.costUsd;
 
+      if (!usage.empty) {
+        allCallsEmpty = false;
+      }
+
       calls.push({
         taskId: task.id,
         step: callStep,
@@ -236,7 +283,7 @@ async function runOneTaskWithTracking(
           cachedTokens: usage.cachedTokens,
           costUsd: usage.costUsd,
         },
-        empty: false,
+        empty: usage.empty,
         httpError: false,
       });
     },
@@ -267,11 +314,24 @@ async function runOneTaskWithTracking(
       if (calls.length > 0) {
         calls[calls.length - 1].httpError = true;
       }
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const httpMatch = errMsg.match(/HTTP\s*(\d{3})/i);
+      if (httpMatch) {
+        httpStatus = parseInt(httpMatch[1], 10);
+      }
+      const codeMatch = errMsg.match(/\b(ECONNREFUSED|ETIMEDOUT|ENOTFOUND|ECONNRESET)\b/i);
+      if (codeMatch) {
+        errorCode = codeMatch[1].toUpperCase();
+      }
+      if (calls.length > 0) {
+        calls[calls.length - 1].httpStatus = httpStatus;
+        calls[calls.length - 1].errorCode = errorCode;
+      }
     }
   }
 
   const check = runCheck(finalAnswer, 0, task.check);
-  const empty = isEmptyAnswer(finalAnswer);
+  const isTaskEmpty = (calls.length > 0 && allCallsEmpty) || isMaxStepsExceeded(finalAnswer) || isEmptyContent(finalAnswer);
 
   return {
     taskId: task.id,
@@ -283,7 +343,7 @@ async function runOneTaskWithTracking(
     tokensOut,
     tokensCached,
     costUsd,
-    empty,
+    empty: isTaskEmpty,
     hadHttpError,
     calls,
     abortReason,
@@ -401,6 +461,8 @@ export async function runMatrix(
 
       cumulativeCost += costUsd;
 
+      const emptyCount = allCalls.filter((c) => c.empty).length;
+
       const runResult: RunResult = {
         model: modelId,
         runN,
@@ -412,6 +474,7 @@ export async function runMatrix(
         costUsd,
         abortReason: modelAbortReason,
         emptyTasks,
+        emptyCount,
         calls: allCalls,
       };
 
@@ -432,8 +495,9 @@ export async function runMatrix(
         date: getTodayDate(),
       };
 
+      const resultsDir = getResultsDir(config.fixture);
       const resultPath = path.join(
-        RESULTS_DIR,
+        resultsDir,
         config.suite,
         `${sha7}-${sanitizeModelId(modelId)}-run${runN}.json`,
       );
@@ -441,7 +505,7 @@ export async function runMatrix(
       await writeFile(resultPath, JSON.stringify(resultRow, null, 2), "utf8");
 
       const metaPath = path.join(
-        RESULTS_DIR,
+        resultsDir,
         config.suite,
         "_meta",
         `${sha7}-${sanitizeModelId(modelId)}-run${runN}.json`,
@@ -461,6 +525,7 @@ export async function runMatrix(
               completionPrice: pricing.completionPrice,
             },
             emptyTasks,
+            emptyCount,
             abortReason: modelAbortReason,
             calls: allCalls,
           },

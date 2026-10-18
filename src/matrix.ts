@@ -9,7 +9,6 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   fetchModelPrices,
   validatePricesForModels,
@@ -19,6 +18,8 @@ import {
   getGitSha7,
   getTodayDate,
   sanitizeModelId,
+  getResultsDir,
+  checkGitStatus,
   registerSensitiveValue,
   redactError,
   safeStringify,
@@ -28,13 +29,10 @@ import {
   SUITE_CONFIGS,
   getDefaultCapUsd,
   getSuiteTasks,
+  MAX_COMPLETION_TOKENS,
   type RunResult,
   type PriceData,
 } from "./matrix/index.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, "..");
-const RESULTS_DIR = path.join(ROOT, "results");
 
 interface CliArgs {
   suite: string;
@@ -45,13 +43,18 @@ interface CliArgs {
   help: boolean;
 }
 
-function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = {
+interface ParsedCliArgs extends CliArgs {
+  errors: string[];
+}
+
+export function parseArgs(argv: string[]): ParsedCliArgs {
+  const args: ParsedCliArgs = {
     suite: DEFAULT_SUITE,
     models: [...DEFAULT_MODELS],
     runs: DEFAULT_RUNS,
     fixture: false,
     help: false,
+    errors: [],
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -61,13 +64,51 @@ function parseArgs(argv: string[]): CliArgs {
     } else if (a === "--help" || a === "-h") {
       args.help = true;
     } else if (a === "--suite" || a === "-s") {
-      args.suite = argv[++i];
+      const val = argv[++i];
+      if (val === undefined || val.startsWith("-")) {
+        args.errors.push("--suite requires a value");
+        i--;
+      } else {
+        args.suite = val;
+      }
     } else if (a === "--models" || a === "-m") {
-      args.models = argv[++i].split(",").map((m) => m.trim());
+      const val = argv[++i];
+      if (val === undefined || val.startsWith("-")) {
+        args.errors.push("--models requires a value");
+        i--;
+      } else {
+        args.models = val.split(",").map((m) => m.trim());
+      }
     } else if (a === "--runs" || a === "-r") {
-      args.runs = parseInt(argv[++i], 10);
+      const val = argv[++i];
+      if (val === undefined || val.startsWith("-")) {
+        args.errors.push("--runs requires a value");
+        i--;
+      } else {
+        const parsed = parseInt(val, 10);
+        if (!Number.isFinite(parsed) || parsed !== parseFloat(val)) {
+          args.errors.push(`--runs must be an integer, got: ${val}`);
+        } else if (parsed < 1) {
+          args.errors.push(`--runs must be at least 1, got: ${parsed}`);
+        } else {
+          args.runs = parsed;
+        }
+      }
     } else if (a === "--cap-usd" || a === "-c") {
-      args.capUsd = parseFloat(argv[++i]);
+      const val = argv[++i];
+      if (val === undefined || val.startsWith("-")) {
+        args.errors.push("--cap-usd requires a value");
+        i--;
+      } else {
+        const parsed = parseFloat(val);
+        if (!Number.isFinite(parsed)) {
+          args.errors.push(`--cap-usd must be a finite number, got: ${val}`);
+        } else if (parsed <= 0) {
+          args.errors.push(`--cap-usd must be greater than 0, got: ${parsed}`);
+        } else {
+          args.capUsd = parsed;
+        }
+      }
     }
   }
 
@@ -118,7 +159,18 @@ function formatSummaryTable(runs: RunResult[]): string {
   return lines.join("\n");
 }
 
-function computeModelStats(runs: RunResult[]): Map<string, { passes: number[]; mean: number; spread: number; totalCost: number; totalIn: number; totalOut: number; totalCached: number | null }> {
+interface ModelStats {
+  passes: number[];
+  mean: number;
+  spread: number;
+  totalCost: number;
+  totalIn: number;
+  totalOut: number;
+  totalCached: number | null;
+  totalEmpty: number;
+}
+
+function computeModelStats(runs: RunResult[]): Map<string, ModelStats> {
   const byModel = new Map<string, RunResult[]>();
   for (const run of runs) {
     const list = byModel.get(run.model) ?? [];
@@ -126,7 +178,7 @@ function computeModelStats(runs: RunResult[]): Map<string, { passes: number[]; m
     byModel.set(run.model, list);
   }
 
-  const stats = new Map<string, { passes: number[]; mean: number; spread: number; totalCost: number; totalIn: number; totalOut: number; totalCached: number | null }>();
+  const stats = new Map<string, ModelStats>();
   for (const [model, modelRuns] of byModel) {
     const passes = modelRuns.map((r) => r.pass);
     const mean = passes.reduce((a, b) => a + b, 0) / passes.length;
@@ -134,13 +186,14 @@ function computeModelStats(runs: RunResult[]): Map<string, { passes: number[]; m
     const totalCost = modelRuns.reduce((a, r) => a + r.costUsd, 0);
     const totalIn = modelRuns.reduce((a, r) => a + r.tokensIn, 0);
     const totalOut = modelRuns.reduce((a, r) => a + r.tokensOut, 0);
+    const totalEmpty = modelRuns.reduce((a, r) => a + r.emptyCount, 0);
     let totalCached: number | null = null;
     for (const r of modelRuns) {
       if (r.tokensCached !== null) {
         totalCached = (totalCached ?? 0) + r.tokensCached;
       }
     }
-    stats.set(model, { passes, mean, spread, totalCost, totalIn, totalOut, totalCached });
+    stats.set(model, { passes, mean, spread, totalCost, totalIn, totalOut, totalCached, totalEmpty });
   }
 
   return stats;
@@ -154,14 +207,14 @@ function printSummaryToConsole(runs: RunResult[], suite: string, capUsd: number,
 
   const stats = computeModelStats(runs);
   console.log("\n--- Per-Model Summary ---");
-  console.log("| Model | Runs | Mean | Spread | Total In | Total Out | Cached | Total Cost |");
-  console.log("|-------|------|------|--------|----------|-----------|--------|------------|");
+  console.log("| Model | Runs | Mean | Spread | Total In | Total Out | Cached | Empty | Total Cost |");
+  console.log("|-------|------|------|--------|----------|-----------|--------|-------|------------|");
 
   for (const [model, s] of stats) {
     const passStr = s.passes.map((p) => `${p}/${taskCount}`).join(", ");
     const cached = s.totalCached !== null ? String(s.totalCached) : "-";
     console.log(
-      `| ${model} | ${passStr} | ${s.mean.toFixed(2)} | ${s.spread} | ${s.totalIn} | ${s.totalOut} | ${cached} | $${s.totalCost.toFixed(6)} |`,
+      `| ${model} | ${passStr} | ${s.mean.toFixed(2)} | ${s.spread} | ${s.totalIn} | ${s.totalOut} | ${cached} | ${s.totalEmpty} | $${s.totalCost.toFixed(6)} |`,
     );
   }
 }
@@ -173,10 +226,12 @@ async function writeSummaryFiles(
   capUsd: number,
   globalAbort: boolean,
   taskCount: number,
+  fixture: boolean,
 ): Promise<{ jsonPath: string; mdPath: string }> {
   const sha7 = getGitSha7();
   const date = getTodayDate();
-  const summaryDir = path.join(RESULTS_DIR, suite);
+  const resultsDir = getResultsDir(fixture);
+  const summaryDir = path.join(resultsDir, suite);
   await mkdir(summaryDir, { recursive: true });
 
   const baseName = `_summary-${sha7}-${date}`;
@@ -258,6 +313,13 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  if (args.errors.length > 0) {
+    for (const err of args.errors) {
+      console.error(`Error: ${err}`);
+    }
+    process.exit(1);
+  }
+
   let tasks;
   try {
     tasks = getSuiteTasks(args.suite);
@@ -275,6 +337,19 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     registerSensitiveValue(apiKey);
+
+    const gitStatus = checkGitStatus();
+    if (gitStatus.error) {
+      console.error(`Error: ${gitStatus.error}`);
+      console.error("Live mode requires a clean git checkout.");
+      process.exit(1);
+    }
+    if (gitStatus.isDirty) {
+      console.error("Error: Working directory has uncommitted changes.");
+      console.error("Live mode requires a clean git checkout (results/ and results-fixture/ are ignored).");
+      process.exit(1);
+    }
+    console.log(`Git SHA: ${gitStatus.sha}`);
   }
 
   const capUsd = args.capUsd ?? getDefaultCapUsd(args.suite);
@@ -285,6 +360,9 @@ async function main(): Promise<void> {
   console.log(`Runs: ${args.runs}`);
   console.log(`Cap: $${capUsd.toFixed(2)}`);
   console.log(`Mode: ${args.fixture ? "fixture" : "live"}`);
+  if (!args.fixture) {
+    console.log(`max_tokens: ${MAX_COMPLETION_TOKENS} (forced)`);
+  }
   console.log("---");
 
   let priceData: PriceData;
@@ -355,17 +433,18 @@ async function main(): Promise<void> {
 
   printSummaryToConsole(runs, args.suite, capUsd, tasks.length);
 
-  const { jsonPath, mdPath } = await writeSummaryFiles(runs, args.suite, priceData, capUsd, globalAbort, tasks.length);
+  const { jsonPath, mdPath } = await writeSummaryFiles(runs, args.suite, priceData, capUsd, globalAbort, tasks.length, args.fixture);
 
   console.log("\n--- Output Files ---");
   console.log(`Summary JSON: ${jsonPath}`);
   console.log(`Summary MD:   ${mdPath}`);
 
+  const resultsDir = getResultsDir(args.fixture);
   const resultFiles: string[] = [];
   for (const run of runs) {
     const sha7 = getGitSha7();
     const fileName = `${sha7}-${sanitizeModelId(run.model)}-run${run.runN}.json`;
-    resultFiles.push(path.join(RESULTS_DIR, args.suite, fileName));
+    resultFiles.push(path.join(resultsDir, args.suite, fileName));
   }
 
   console.log(`Per-run results:`);
@@ -373,12 +452,17 @@ async function main(): Promise<void> {
     console.log(`  ${f}`);
   }
 
-  const totalPassed = runs.every((r) => r.pass === r.total && !r.abortReason);
-  process.exit(totalPassed ? 0 : 1);
+  if (globalAbort) {
+    process.exit(1);
+  }
+  process.exit(0);
 }
 
-main().catch((err) => {
-  const redacted = redactError(err);
-  console.error(redacted.message);
-  process.exit(1);
-});
+const isMainModule = import.meta.url === `file://${process.argv[1]}`;
+if (isMainModule) {
+  main().catch((err) => {
+    const redacted = redactError(err);
+    console.error(redacted.message);
+    process.exit(1);
+  });
+}
