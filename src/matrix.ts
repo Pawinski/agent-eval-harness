@@ -18,6 +18,7 @@ import {
   validatePricesForModels,
   createFixturePrices,
   sortModelsByFullWorstCase,
+  calculateModelFullWorstCaseWithCallsPerRun,
   runMatrix,
   getGitSha7,
   getTodayDate,
@@ -489,6 +490,13 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
     iMax,
   );
   console.log(`Running models (ascending worst-case): ${sortedModels.join(", ")}`);
+  const worstCaseLine = sortedModels
+    .map((m) => {
+      const pricing = priceData.models.get(m);
+      return pricing ? `${m} $${calculateModelFullWorstCaseWithCallsPerRun(args.runs, callsPerRun, iMax, pricing).toFixed(2)}` : `${m} n/a`;
+    })
+    .join(", ");
+  console.log(`Worst case per model (${args.runs} runs x ${callsPerRun} calls): ${worstCaseLine}`);
 
   let creditProvider: CreditProvider | undefined;
   let initialCredit: number | null = null;

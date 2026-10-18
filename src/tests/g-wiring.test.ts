@@ -206,6 +206,24 @@ describe("g production wiring", () => {
     expect(calculateModelFullWorstCaseWithCallsPerRun(1, 16 * 12, iMax, opus)).toBeCloseTo(16.73, 2);
   });
 
+  it("runMain pre-flight uses 118 calls/run for 0.2.0: opus x 3 runs = $30.84 (flat would be $50.19)", async () => {
+    const lines: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => { lines.push(a.join(" ")); });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const opus = "anthropic/claude-opus-5.5";
+    await runMain({
+      argv: ["--suite", "0.2.0", "--models", opus, "--runs", "3", "--credit-usd", "1"],
+      env: { OPENROUTER_API_KEY: "test-key-not-real" },
+      getGitStatus: () => ({ sha: "0".repeat(40), isDirty: false }),
+      skipPricesFetch: true,
+      priceData: { fetchedAt: "t", models: new Map([[opus, { modelId: opus, promptPrice: 12 / 1_000_000, completionPrice: 60 / 1_000_000 }]]) },
+      skipFileWrites: true,
+      llmClientFactory: (): LlmClient => { throw new Error("no calls expected"); },
+    });
+    const line = lines.find((l) => l.startsWith("Worst case per model"));
+    expect(line).toBe(`Worst case per model (3 runs x 118 calls): ${opus} $30.84`);
+  });
+
   it("patch-check prelude timeout is 50 ms", () => {
     expect(PRELUDE_TIMEOUT_MS).toBe(50);
   });
