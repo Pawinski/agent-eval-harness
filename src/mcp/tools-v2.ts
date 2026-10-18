@@ -312,7 +312,7 @@ export function runPreflight(): void {
   const check = checkPermissionModelSupport();
   if (!check.ok) {
     console.error(`PREFLIGHT FAILED: ${check.message}`);
-    console.error("Suite 0.2.0 requires Node >= 20 with permission model support.");
+    console.error("Suite 0.2.0 requires Node >= 22 with permission model support.");
     console.error("Please upgrade Node or use a supported version.");
     process.exit(1);
   }
