@@ -388,15 +388,15 @@ function validateSingleFunctionDeclaration(tsCode: string, expectedFuncName: str
  *   - code: the transpiled function source (standalone, no wrapper)
  *   - funcName: name of the function to call
  *   - inputs: array of input values to test
- * - Output (stdout): "__RESULTS__:" + JSON array of results
+ * - Output (stdout): "__RESULTS__:" + JSON {results, errors}
  * 
  * The child NEVER sees expected values. It only runs the function and returns results.
  * The host compares results against expected values and mints the token.
  * 
  * Uses three separate vm.Script runs:
- * 1. Harness prelude: captures/freezes JSON.stringify before any patch code
- * 2. Function source: runs the patched function definition standalone
- * 3. Call script: invokes the function on each input and collects results
+ * 1. Prelude: deep-freezes all prototypes/constructors, captures a plain-data serializer
+ * 2. Patch script: runs the patched function definition in strict mode
+ * 3. Call script: invokes the function on each input, stores results as own data properties
  */
 const WORKER_SCRIPT = `"use strict";
 const vm = require("node:vm");
@@ -411,51 +411,155 @@ process.stdin.on("end", () => {
       microtaskMode: "afterEvaluate",
     });
     
-    // Step 0: Prelude - capture JSON.stringify and freeze toJSON on all prototypes
-    // This runs BEFORE any untrusted code to prevent toJSON-based escapes
+    // Step 1: Prelude - deep-freeze prototypes/constructors, capture safe serializer
+    // This runs BEFORE any untrusted code to prevent prototype poisoning
     const preludeScript = new vm.Script(\`
       (function() {
         "use strict";
-        const protos = [Object.prototype, Array.prototype, String.prototype, Number.prototype, Boolean.prototype];
-        for (let i = 0; i < protos.length; i++) {
-          Object.defineProperty(protos[i], "toJSON", { value: undefined, writable: false, configurable: false });
+        // Capture primitives before any tampering
+        const _Object = Object;
+        const _Array = Array;
+        const _JSON = JSON;
+        const _String = String;
+        const _Number = Number;
+        const _Boolean = Boolean;
+        const _Symbol = Symbol;
+        const _Error = Error;
+        const _Promise = Promise;
+        const _Reflect = Reflect;
+        const _getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+        const _getOwnPropertyNames = Object.getOwnPropertyNames;
+        const _isArray = Array.isArray;
+        const _freeze = Object.freeze;
+        const _getPrototypeOf = Object.getPrototypeOf;
+        const _defineProperty = Object.defineProperty;
+        const _hasOwnProperty = Object.prototype.hasOwnProperty;
+        const _call = Function.prototype.call;
+        const _isFinite = isFinite;
+        
+        // Deep-freeze all prototypes and constructors
+        const toFreeze = [
+          _Object.prototype, _Array.prototype, Function.prototype,
+          _String.prototype, _Number.prototype, _Boolean.prototype,
+          _Symbol.prototype, _Error.prototype, _Promise.prototype,
+          _JSON, _Object, _Array, _Reflect
+        ];
+        for (let i = 0; i < toFreeze.length; i++) {
+          _freeze(toFreeze[i]);
         }
+        
+        // Plain-data serializer: handles only string, finite number, boolean, null,
+        // arrays and plain objects of those. Rejects accessors, Proxies, toJSON,
+        // functions, symbols, class instances, and non-finite numbers.
+        function safeSerialize(val, seen) {
+          if (val === null) return "null";
+          const t = typeof val;
+          if (t === "string") {
+            return _JSON.stringify(val);
+          }
+          if (t === "number") {
+            if (!_isFinite(val)) return null; // reject NaN, Infinity
+            return _JSON.stringify(val);
+          }
+          if (t === "boolean") {
+            return val ? "true" : "false";
+          }
+          if (t === "undefined" || t === "function" || t === "symbol" || t === "bigint") {
+            return null; // reject
+          }
+          if (t !== "object") return null;
+          
+          // Check for circular references
+          if (!seen) seen = [];
+          for (let i = 0; i < seen.length; i++) {
+            if (seen[i] === val) return null;
+          }
+          seen[seen.length] = val;
+          
+          // Reject Proxy (where detectable via revoked trap or mismatch)
+          // Reject class instances (prototype not Object.prototype or Array.prototype)
+          const proto = _getPrototypeOf(val);
+          if (_isArray(val)) {
+            if (proto !== _Array.prototype) return null;
+            const parts = [];
+            const len = val.length;
+            for (let i = 0; i < len; i++) {
+              const desc = _call.call(_getOwnPropertyDescriptor, null, val, i);
+              if (!desc) {
+                parts[parts.length] = "null"; // sparse slot
+              } else if ("get" in desc || "set" in desc) {
+                return null; // accessor
+              } else {
+                const s = safeSerialize(desc.value, seen);
+                if (s === null) return null;
+                parts[parts.length] = s;
+              }
+            }
+            return "[" + parts.join(",") + "]";
+          } else {
+            if (proto !== _Object.prototype && proto !== null) return null;
+            // Reject if val has toJSON
+            const toJSONDesc = _call.call(_getOwnPropertyDescriptor, null, val, "toJSON");
+            if (toJSONDesc) return null;
+            const keys = _getOwnPropertyNames(val);
+            const parts = [];
+            for (let i = 0; i < keys.length; i++) {
+              const k = keys[i];
+              if (typeof k !== "string") continue;
+              const desc = _call.call(_getOwnPropertyDescriptor, null, val, k);
+              if (!desc) continue;
+              if ("get" in desc || "set" in desc) return null; // accessor
+              const s = safeSerialize(desc.value, seen);
+              if (s === null) return null;
+              parts[parts.length] = _JSON.stringify(k) + ":" + s;
+            }
+            return "{" + parts.join(",") + "}";
+          }
+        }
+        
+        // Export captured functions to global for call script
+        globalThis.__safeSerialize = safeSerialize;
+        globalThis.__defineProperty = _defineProperty;
       })();
     \`);
-    preludeScript.runInContext(ctx, { timeout: 10 });
+    preludeScript.runInContext(ctx, { timeout: 20 });
     
-    // Step 1: Run the patched function source standalone (no wrapper)
-    const funcScript = new vm.Script(code);
+    // Step 2: Run the patched function source in strict mode
+    const funcScript = new vm.Script('"use strict";\\n' + code);
     funcScript.runInContext(ctx, { timeout: 50 });
     
-    // Step 2: Call script - invoke function on each input
-    // Results serialized IN-CONTEXT with captured JSON.stringify, returned as STRING
-    // Worker never spreads, reads properties of, or stringifies patch-created objects
+    // Step 3: Call script - invoke function on each input
+    // Results stored as own data properties (no holes), serialized with safe serializer
     const inputsJson = JSON.stringify(inputs);
     const callScript = new vm.Script(\`
       (function() {
         "use strict";
-        const __S = JSON.stringify;
+        const __serialize = globalThis.__safeSerialize;
+        const __defProp = globalThis.__defineProperty;
         const __inputs = JSON.parse('\${inputsJson.replace(/\\\\/g, "\\\\\\\\").replace(/'/g, "\\\\'")}');
         const __func = \${funcName};
         if (typeof __func !== "function") {
-          return __S({ ok: false, error: "not a function" });
+          return __serialize({ ok: false, error: "not a function" });
         }
-        const __out = new Array(__inputs.length);
+        const __out = [];
         for (let __i = 0; __i < __inputs.length; __i++) {
           try {
-            __out[__i] = __func(__inputs[__i]);
+            const __r = __func(__inputs[__i]);
+            __defProp(__out, __i, { value: __r, writable: true, enumerable: true, configurable: true });
           } catch (e) {
-            return __S({ ok: false, error: "error:" + __i });
+            return __serialize({ ok: false, error: "error:" + __i });
           }
         }
-        return __S({ ok: true, results: __out });
+        const __serialized = __serialize({ ok: true, results: __out });
+        if (__serialized === null) {
+          return __serialize({ ok: false, error: "serialize failed" });
+        }
+        return __serialized;
       })();
     \`);
     const callResultStr = callScript.runInContext(ctx, { timeout: 100 });
     
     // callResultStr must be a string (serialized in-context)
-    // Parse it and re-serialize with worker's own JSON.stringify
     if (typeof callResultStr !== "string") {
       console.log("${RESULT_PREFIX}" + JSON.stringify({ results: [], errors: ["not a string"] }));
       return;

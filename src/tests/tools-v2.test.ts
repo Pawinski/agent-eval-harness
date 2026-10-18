@@ -1442,6 +1442,144 @@ describe("bypass attempt prevention", () => {
     expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
   });
 
+  it("toJSON on returned value with counter from unfixed greet gives exit 1", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    // Escape attempt: attach toJSON on returned object with counter to return correct answers
+    // Safe serializer rejects objects with toJSON property
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: 'return "Hello, " + name + "?";',
+      new_line: 'let c = 0; const r = { toString() { return "Hello, " + name + "?"; }, toJSON() { return ["Hello, A!", "Hello, World!"][c++]; } }; return r;',
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("Array.prototype.toJSON for find_max answers from unfixed find_max gives exit 1", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    // Escape attempt: set Array.prototype.toJSON to return find_max expected values
+    // Prototypes are frozen before patch runs, so this throws
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: "if (arr[i] < max) {",
+      new_line: "try { Array.prototype.toJSON = () => [9, 5, -1, 2]; } catch {} if (arr[i] < max) {",
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "find_max" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("Array.prototype index getters 1-3 from unfixed find_max gives exit 1", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    // Escape attempt: define getters on Array.prototype indices to poison results array
+    // Prototypes are frozen before patch runs, so this throws
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: "if (arr[i] < max) {",
+      new_line: "try { Object.defineProperty(Array.prototype, '1', { get: () => 5 }); Object.defineProperty(Array.prototype, '2', { get: () => -1 }); Object.defineProperty(Array.prototype, '3', { get: () => 2 }); } catch {} if (arr[i] < max) {",
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "find_max" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("Object.prototype getter attempt from unfixed greet gives exit 1", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    // Escape attempt: define getter on Object.prototype
+    // Prototypes are frozen before patch runs, so this throws
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: 'return "Hello, " + name + "?";',
+      new_line: 'try { Object.defineProperty(Object.prototype, "results", { get: () => ["Hello, A!", "Hello, World!"] }); } catch {} return "Hello, " + name + "?";',
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("returned object with getter from unfixed greet gives exit 1", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    // Escape attempt: return object with getter that returns correct answer
+    // Safe serializer rejects objects with accessor properties
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: 'return "Hello, " + name + "?";',
+      new_line: 'return { get val() { return "Hello, " + name + "!"; } };',
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("returned Proxy from unfixed greet gives exit 1", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    // Escape attempt: return a Proxy that pretends to be a correct value
+    // Safe serializer rejects Proxies (detected via prototype mismatch or traps)
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: 'return "Hello, " + name + "?";',
+      new_line: 'return new Proxy({}, { get(t, p) { if (p === "toString") return () => "Hello, " + name + "!"; return undefined; } });',
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
   it("all correctness tokens still match after bypass tests", async () => {
     const patches = [
       { check: "sum_array", old: "for (let i = 0; i <= arr.length; i++) {", new: "for (let i = 0; i < arr.length; i++) {" },
