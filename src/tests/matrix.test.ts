@@ -12,6 +12,7 @@ import {
   getResultsDir,
   type ModelPricing,
   type PriceData,
+  type CallResult,
   getDefaultCapUsd,
   getDefaultIMax,
   getDefaultMaxInputTokens,
@@ -872,5 +873,73 @@ describe("empty response tracking", () => {
 
     await wrappedLlm.complete({ messages: [] });
     expect(receivedEmpty).toBe(true);
+  });
+});
+
+describe("HTTP status and error code recording", () => {
+  it("CallResult type includes httpStatus and errorCode fields", () => {
+    const callResult: CallResult = {
+      taskId: "test-task",
+      step: 1,
+      usage: {
+        promptTokens: 100,
+        completionTokens: 50,
+        cachedTokens: null,
+        costUsd: 0.001,
+      },
+      empty: false,
+      httpError: true,
+      httpStatus: 401,
+      errorCode: "UNAUTHORIZED",
+    };
+
+    expect(callResult.httpStatus).toBe(401);
+    expect(callResult.errorCode).toBe("UNAUTHORIZED");
+  });
+
+  it("CallResult allows missing httpStatus and errorCode", () => {
+    const callResult: CallResult = {
+      taskId: "test-task",
+      step: 1,
+      usage: {
+        promptTokens: 100,
+        completionTokens: 50,
+        cachedTokens: null,
+        costUsd: 0.001,
+      },
+      empty: false,
+      httpError: false,
+    };
+
+    expect(callResult.httpStatus).toBeUndefined();
+    expect(callResult.errorCode).toBeUndefined();
+  });
+
+  it("extracts HTTP status from error message pattern", () => {
+    const errorMsg = "Request failed: HTTP 429 Too Many Requests";
+    const httpMatch = errorMsg.match(/HTTP\s*(\d{3})/i);
+    expect(httpMatch).not.toBeNull();
+    expect(parseInt(httpMatch![1], 10)).toBe(429);
+  });
+
+  it("extracts error code from error message pattern", () => {
+    const errorMsg = "fetch failed: ECONNREFUSED at 127.0.0.1:443";
+    const codeMatch = errorMsg.match(/\b(ECONNREFUSED|ETIMEDOUT|ENOTFOUND|ECONNRESET)\b/i);
+    expect(codeMatch).not.toBeNull();
+    expect(codeMatch![1].toUpperCase()).toBe("ECONNREFUSED");
+  });
+
+  it("handles ETIMEDOUT error code", () => {
+    const errorMsg = "connect ETIMEDOUT 1.2.3.4:443";
+    const codeMatch = errorMsg.match(/\b(ECONNREFUSED|ETIMEDOUT|ENOTFOUND|ECONNRESET)\b/i);
+    expect(codeMatch).not.toBeNull();
+    expect(codeMatch![1].toUpperCase()).toBe("ETIMEDOUT");
+  });
+
+  it("handles ENOTFOUND error code", () => {
+    const errorMsg = "getaddrinfo ENOTFOUND api.example.com";
+    const codeMatch = errorMsg.match(/\b(ECONNREFUSED|ETIMEDOUT|ENOTFOUND|ECONNRESET)\b/i);
+    expect(codeMatch).not.toBeNull();
+    expect(codeMatch![1].toUpperCase()).toBe("ENOTFOUND");
   });
 });
