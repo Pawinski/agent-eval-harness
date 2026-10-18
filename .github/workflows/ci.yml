@@ -32,5 +32,5 @@ jobs:
           cp -r . "/tmp/test dir with spaces/repo"
           cd "/tmp/test dir with spaces/repo"
           npm run matrix -- --fixture
-          test -d results-fixture/0.1.0 || { echo "results-fixture/0.1.0 missing"; exit 1; }
-          ls -la results-fixture/0.1.0/
+          test -d results-fixture/0.2.0 || { echo "results-fixture/0.2.0 missing"; exit 1; }
+          ls -la results-fixture/0.2.0/
