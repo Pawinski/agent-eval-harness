@@ -10,8 +10,11 @@ import { execSync } from "node:child_process";
 import { ReactAgent, type ReactLogEntry } from "../agent/react.js";
 import {
   createLlmClient,
+  ProviderError,
+  RateLimitExhaustedError,
   type LlmClient,
   type LlmCompletionResponse,
+  type LlmCallMeta,
 } from "../llm/index.js";
 import {
   createDefaultMcpClient,
@@ -39,8 +42,9 @@ import {
   getDefaultIMax,
   getDefaultMaxInputTokens,
   getSuiteTasks,
+  getCallsPerRun,
 } from "./types.js";
-import { calculateModelFullWorstCase } from "./prices.js";
+import { calculateModelFullWorstCaseWithCallsPerRun } from "./prices.js";
 import { safeStringify } from "./redact.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -134,6 +138,9 @@ interface TaskRunResult {
   hadHttpError: boolean;
   calls: CallResult[];
   abortReason?: AbortReason;
+  retries: number;
+  rateLimitExhausted?: boolean;
+  providerError?: { code?: string; type?: string };
 }
 
 interface RunContext {
@@ -166,6 +173,7 @@ export interface MatrixLlmClientConfig {
     cachedTokens: number | null;
     costUsd: number;
     empty: boolean;
+    _meta?: LlmCallMeta;
   }) => void;
 }
 
@@ -210,7 +218,7 @@ export class MatrixLlmClient implements LlmClient {
     const costUsd = calculateCallCost(promptTokens, completionTokens, pricing);
     const empty = isEmptyContent(result.content);
 
-    this.config.onCall({ promptTokens, completionTokens, cachedTokens, costUsd, empty });
+    this.config.onCall({ promptTokens, completionTokens, cachedTokens, costUsd, empty, _meta: result._meta });
 
     if (completionTokens > MAX_COMPLETION_TOKENS) {
       throw new MatrixAbort("completion_tokens_exceeded", `Completion tokens exceeded: ${completionTokens} > ${MAX_COMPLETION_TOKENS}`);
@@ -228,7 +236,6 @@ async function runOneTaskWithTracking(
   task: SuiteTask,
   ctx: RunContext,
   runCostSoFar: number,
-  taskCount: number,
   llmClientFactory?: LlmClientFactory,
 ): Promise<TaskRunResult> {
   const calls: CallResult[] = [];
@@ -241,9 +248,13 @@ async function runOneTaskWithTracking(
   let errorCode: string | undefined;
   let abortReason: AbortReason | undefined;
   let allCallsEmpty = true;
+  let totalRetries = 0;
+  let rateLimitExhausted = false;
+  let providerError: { code?: string; type?: string } | undefined;
 
+  const callsPerRunForTask = getCallsPerRun(ctx.suite);
   const worstCasePerRun = calculateWorstCaseCost(
-    taskCount * ctx.maxSteps,
+    callsPerRunForTask,
     ctx.iMax,
     MAX_COMPLETION_TOKENS,
     ctx.pricing,
@@ -268,6 +279,7 @@ async function runOneTaskWithTracking(
       empty: isEmpty,
       hadHttpError: false,
       calls: [],
+      retries: 0,
     };
   }
 
@@ -300,6 +312,9 @@ async function runOneTaskWithTracking(
         allCallsEmpty = false;
       }
 
+      const callRetries = usage._meta?.retries ?? 0;
+      totalRetries += callRetries;
+
       calls.push({
         taskId: task.id,
         step: callStep,
@@ -311,6 +326,9 @@ async function runOneTaskWithTracking(
         },
         empty: usage.empty,
         httpError: false,
+        retries: callRetries > 0 ? callRetries : undefined,
+        droppedParameters: usage._meta?.droppedParameters,
+        providerError: usage._meta?.providerError,
       });
     },
   });
@@ -336,6 +354,41 @@ async function runOneTaskWithTracking(
   } catch (err) {
     if (err instanceof MatrixAbort) {
       abortReason = err.reason;
+    } else if (err instanceof RateLimitExhaustedError) {
+      rateLimitExhausted = true;
+      abortReason = "rate_limited";
+      totalRetries += err.retries;
+      callStep++;
+      calls.push({
+        taskId: task.id,
+        step: callStep,
+        usage: {
+          promptTokens: 0,
+          completionTokens: 0,
+          cachedTokens: null,
+          costUsd: 0,
+        },
+        empty: false,
+        httpError: false,
+        retries: err.retries,
+      });
+    } else if (err instanceof ProviderError) {
+      providerError = { code: err.code, type: err.type };
+      abortReason = "provider_error";
+      callStep++;
+      calls.push({
+        taskId: task.id,
+        step: callStep,
+        usage: {
+          promptTokens: 0,
+          completionTokens: 0,
+          cachedTokens: null,
+          costUsd: 0,
+        },
+        empty: false,
+        httpError: false,
+        providerError: { code: err.code, type: err.type },
+      });
     } else {
       hadHttpError = true;
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -382,6 +435,9 @@ async function runOneTaskWithTracking(
     hadHttpError,
     calls,
     abortReason,
+    retries: totalRetries,
+    rateLimitExhausted,
+    providerError,
   };
 }
 
@@ -461,16 +517,17 @@ export async function runMatrix(
   let cumulativeCost = 0;
   let globalAbort = false;
 
+  const callsPerRun = getCallsPerRun(config.suite);
+
   for (const modelId of config.models) {
     const pricing = priceData.models.get(modelId);
     if (!pricing) {
       throw new Error(`Missing pricing for model: ${modelId}`);
     }
 
-    const modelFullWorstCase = calculateModelFullWorstCase(
+    const modelFullWorstCase = calculateModelFullWorstCaseWithCallsPerRun(
       config.runs,
-      taskCount,
-      maxSteps,
+      callsPerRun,
       iMax,
       pricing,
     );
@@ -530,13 +587,14 @@ export async function runMatrix(
       const emptyTasks: string[] = [];
       const allCalls: CallResult[] = [];
       let tasksWithHttpErrors = 0;
+      let totalRetries = 0;
 
       for (const task of tasks) {
         if (modelAbortReason || globalAbort) {
           break;
         }
 
-        const taskResult = await runOneTaskWithTracking(task, ctx, costUsd, taskCount, llmClientFactory);
+        const taskResult = await runOneTaskWithTracking(task, ctx, costUsd, llmClientFactory);
 
         if (taskResult.pass) pass++;
         tokensIn += taskResult.tokensIn;
@@ -546,6 +604,7 @@ export async function runMatrix(
         }
         costUsd += taskResult.costUsd;
         allCalls.push(...taskResult.calls);
+        totalRetries += taskResult.retries;
 
         if (taskResult.empty && !taskResult.hadHttpError) {
           emptyTasks.push(task.id);
@@ -562,6 +621,17 @@ export async function runMatrix(
           if (taskResult.abortReason === "global_cap") {
             globalAbort = true;
             callbacks?.onGlobalAbort?.();
+          } else if (taskResult.abortReason === "rate_limited") {
+            modelAbortReason = "rate_limited";
+            skippedModels.push({
+              model: modelId,
+              worstCase: modelFullWorstCase,
+              remaining: (config.capUsd ?? Infinity) - cumulativeCost,
+              shortfall: 0,
+              reason: "rate_limited",
+              retries: taskResult.retries,
+            });
+            callbacks?.onModelSkipped?.(modelId, modelFullWorstCase, 0, 0, "rate_limited");
           } else {
             modelAbortReason = taskResult.abortReason;
           }
@@ -587,6 +657,7 @@ export async function runMatrix(
         emptyTasks,
         emptyCount,
         calls: allCalls,
+        retries: totalRetries,
       };
 
       runs.push(runResult);
@@ -640,6 +711,7 @@ export async function runMatrix(
               emptyCount,
               abortReason: modelAbortReason,
               calls: allCalls,
+              retries: totalRetries,
             },
             2,
           ),

@@ -541,7 +541,7 @@ process.stdin.on("end", () => {
         globalThis.__defineProperty = _defineProperty;
       })();
     \`);
-    preludeScript.runInContext(ctx, { timeout: 20 });
+    preludeScript.runInContext(ctx, { timeout: 50 });
     
     // Step 2: Run the patched function source in strict mode
     const funcScript = new vm.Script('"use strict";\\n' + code);

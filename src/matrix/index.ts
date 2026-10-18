@@ -4,6 +4,7 @@
 
 export {
   fetchModelPrices,
+  fetchModelPricesWithParams,
   validatePricesForModels,
   calculateCallCost,
   calculateWorstCaseCost,
@@ -11,8 +12,10 @@ export {
   sortModelsByCost,
   fetchCreditInfo,
   calculateModelFullWorstCase,
+  calculateModelFullWorstCaseWithCallsPerRun,
   sortModelsByFullWorstCase,
   type CreditCheckResult,
+  type PriceDataWithParams,
 } from "./prices.js";
 
 export {
@@ -57,6 +60,7 @@ export {
   getDefaultMaxInputTokens,
   getSuiteTasks,
   getSuiteTasksV2,
+  getCallsPerRun,
 } from "./types.js";
 
 export {

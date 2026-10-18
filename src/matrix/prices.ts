@@ -14,15 +14,28 @@ interface OpenRouterModel {
     prompt?: string;
     completion?: string;
   };
+  supported_parameters?: string[];
 }
 
 interface OpenRouterModelsResponse {
   data: OpenRouterModel[];
 }
 
+export interface PriceDataWithParams extends PriceData {
+  supportedParameters: Map<string, Set<string>>;
+  parametersFetched: boolean;
+}
+
 export async function fetchModelPrices(
   requestedModels: string[],
 ): Promise<PriceData> {
+  const result = await fetchModelPricesWithParams(requestedModels);
+  return { fetchedAt: result.fetchedAt, models: result.models };
+}
+
+export async function fetchModelPricesWithParams(
+  requestedModels: string[],
+): Promise<PriceDataWithParams> {
   const response = await fetch(OPENROUTER_MODELS_URL);
 
   if (!response.ok) {
@@ -35,6 +48,8 @@ export async function fetchModelPrices(
   const fetchedAt = new Date().toISOString();
 
   const models = new Map<string, ModelPricing>();
+  const supportedParameters = new Map<string, Set<string>>();
+  let parametersFetched = false;
 
   for (const model of json.data) {
     if (!requestedModels.includes(model.id)) {
@@ -55,9 +70,14 @@ export async function fetchModelPrices(
         completionPrice,
       });
     }
+
+    if (model.supported_parameters && Array.isArray(model.supported_parameters)) {
+      supportedParameters.set(model.id, new Set(model.supported_parameters));
+      parametersFetched = true;
+    }
   }
 
-  return { fetchedAt, models };
+  return { fetchedAt, models, supportedParameters, parametersFetched };
 }
 
 export function sortModelsByCost(
@@ -197,6 +217,17 @@ export function calculateModelFullWorstCase(
   pricing: ModelPricing,
 ): number {
   const callsPerRun = taskCount * maxSteps;
+  const outputTokens = 512;
+  return runs * calculateWorstCaseCost(callsPerRun, iMax, outputTokens, pricing);
+}
+
+/** Calculate worst case using per-run call count (for per-task maxSteps support) */
+export function calculateModelFullWorstCaseWithCallsPerRun(
+  runs: number,
+  callsPerRun: number,
+  iMax: number,
+  pricing: ModelPricing,
+): number {
   const outputTokens = 512;
   return runs * calculateWorstCaseCost(callsPerRun, iMax, outputTokens, pricing);
 }
