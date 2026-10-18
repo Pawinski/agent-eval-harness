@@ -189,15 +189,23 @@ function formatSummaryTable(runs: RunResult[]): string {
 
 interface ModelStats {
   passes: number[];
-  mean: number;
-  spread: number;
+  /** null when the model is not scored: no scored runs, or any run aborted. */
+  mean: number | null;
+  spread: number | null;
   totalCost: number;
   totalIn: number;
   totalOut: number;
   totalCached: number | null;
   totalEmpty: number;
   abortedRuns: number;
+  /** Distinct abort reasons of this model's aborted runs, in run order. */
+  abortReasons: string[];
   tempSent: boolean | "mixed" | null;
+}
+
+/** A model with any aborted run is not scored at model level; its scored per-run rows stay on record. */
+function modelStatusLabel(s: ModelStats): string {
+  return s.abortReasons.length > 0 ? `not scored (${s.abortReasons.join(", ")})` : "-";
 }
 
 function computeModelStats(runs: RunResult[]): Map<string, ModelStats> {
@@ -212,9 +220,12 @@ function computeModelStats(runs: RunResult[]): Map<string, ModelStats> {
   for (const [model, modelRuns] of byModel) {
     const scoredRuns = modelRuns.filter((r) => !r.abortReason);
     const abortedRuns = modelRuns.filter((r) => r.abortReason).length;
+    const abortReasons = [...new Set(modelRuns.filter((r) => r.abortReason).map((r) => String(r.abortReason)))];
     const passes = scoredRuns.map((r) => r.pass);
-    const mean = passes.length > 0 ? passes.reduce((a, b) => a + b, 0) / passes.length : 0;
-    const spread = passes.length > 0 ? Math.max(...passes) - Math.min(...passes) : 0;
+    // Any aborted run means the model is not scored: mean and spread are null, not a partial figure.
+    const scored = passes.length > 0 && abortedRuns === 0;
+    const mean = scored ? passes.reduce((a, b) => a + b, 0) / passes.length : null;
+    const spread = scored ? Math.max(...passes) - Math.min(...passes) : null;
     const totalCost = modelRuns.reduce((a, r) => a + r.costUsd, 0);
     const totalIn = modelRuns.reduce((a, r) => a + r.tokensIn, 0);
     const totalOut = modelRuns.reduce((a, r) => a + r.tokensOut, 0);
@@ -232,7 +243,7 @@ function computeModelStats(runs: RunResult[]): Map<string, ModelStats> {
     } else if (tempValues.size > 1) {
       tempSent = "mixed";
     }
-    stats.set(model, { passes, mean, spread, totalCost, totalIn, totalOut, totalCached, totalEmpty, abortedRuns, tempSent });
+    stats.set(model, { passes, mean, spread, totalCost, totalIn, totalOut, totalCached, totalEmpty, abortedRuns, abortReasons, tempSent });
   }
 
   return stats;
@@ -253,17 +264,11 @@ export function printSummaryToConsole(runs: RunResult[], suite: string, capUsd: 
     let passStr: string;
     let meanStr: string;
     let spreadStr: string;
-    if (s.passes.length === 0) {
-      passStr = "-";
-      meanStr = "-";
-      spreadStr = "-";
-    } else {
-      passStr = s.passes.map((p) => `${p}/${taskCount}`).join(", ");
-      meanStr = s.mean.toFixed(2);
-      spreadStr = String(s.spread);
-    }
+    passStr = s.passes.length > 0 ? s.passes.map((p) => `${p}/${taskCount}`).join(", ") : "-";
+    meanStr = s.mean !== null ? s.mean.toFixed(2) : "-";
+    spreadStr = s.spread !== null ? String(s.spread) : "-";
     const cached = s.totalCached !== null ? String(s.totalCached) : "-";
-    const status = s.abortedRuns > 0 ? `${s.abortedRuns} aborted` : "-";
+    const status = modelStatusLabel(s);
     const temp = s.tempSent === true ? "yes" : s.tempSent === false ? "no" : s.tempSent === "mixed" ? "mixed" : "-";
     console.log(
       `| ${model} | ${passStr} | ${meanStr} | ${spreadStr} | ${s.totalIn} | ${s.totalOut} | ${cached} | ${s.totalEmpty} | $${s.totalCost.toFixed(6)} | ${status} | ${temp} |`,
@@ -277,7 +282,7 @@ export function printSummaryToConsole(runs: RunResult[], suite: string, capUsd: 
   }
 }
 
-async function writeSummaryFiles(
+export async function writeSummaryFiles(
   runs: RunResult[],
   suite: string,
   priceData: PriceData,
@@ -304,9 +309,9 @@ async function writeSummaryFiles(
   for (const [model, s] of stats) {
     modelSummaries[model] = {
       passes: s.passes,
-      // No scored runs: mean/spread are null, not 0.
-      mean: s.passes.length > 0 ? s.mean : null,
-      spread: s.passes.length > 0 ? s.spread : null,
+      // Not scored (no scored runs, or any run aborted): mean/spread are null, not 0 or a partial figure.
+      mean: s.mean,
+      spread: s.spread,
       abortedRuns: s.abortedRuns,
       totalCost: s.totalCost,
       totalIn: s.totalIn,
@@ -372,16 +377,10 @@ async function writeSummaryFiles(
     let passStr: string;
     let meanStr: string;
     let spreadStr: string;
-    if (s.passes.length === 0) {
-      passStr = "-";
-      meanStr = "-";
-      spreadStr = "-";
-    } else {
-      passStr = s.passes.map((p) => `${p}/${taskCount}`).join(", ");
-      meanStr = s.mean.toFixed(2);
-      spreadStr = String(s.spread);
-    }
-    const status = s.abortedRuns > 0 ? `${s.abortedRuns} aborted` : "-";
+    passStr = s.passes.length > 0 ? s.passes.map((p) => `${p}/${taskCount}`).join(", ") : "-";
+    meanStr = s.mean !== null ? s.mean.toFixed(2) : "-";
+    spreadStr = s.spread !== null ? String(s.spread) : "-";
+    const status = modelStatusLabel(s);
     mdLines.push(`| ${model} | ${passStr} | ${meanStr} | ${spreadStr} | $${s.totalCost.toFixed(6)} | ${status} |`);
   }
 
