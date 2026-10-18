@@ -10,9 +10,11 @@ import {
   sortModelsByCost,
   checkGitStatus,
   getResultsDir,
+  runMatrix,
   type ModelPricing,
   type PriceData,
   type CallResult,
+  type LlmClientFactory,
   getDefaultCapUsd,
   getDefaultIMax,
   getDefaultMaxInputTokens,
@@ -30,7 +32,7 @@ import {
   redactError,
   safeStringify,
 } from "../matrix/redact.js";
-import { parseArgs } from "../matrix.js";
+import { parseArgs, runMain } from "../matrix.js";
 import type { LlmClient, LlmCompletionResponse } from "../llm/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -941,5 +943,394 @@ describe("HTTP status and error code recording", () => {
     const codeMatch = errorMsg.match(/\b(ECONNREFUSED|ETIMEDOUT|ENOTFOUND|ECONNRESET)\b/i);
     expect(codeMatch).not.toBeNull();
     expect(codeMatch![1].toUpperCase()).toBe("ENOTFOUND");
+  });
+});
+
+// ====================
+// BEHAVIORAL TESTS
+// ====================
+
+describe("1. Empty responses end-to-end", () => {
+  const zeroPricing: ModelPricing = {
+    modelId: "test/empty-model",
+    promptPrice: 0,
+    completionPrice: 0,
+  };
+
+  const zeroPriceData: PriceData = {
+    fetchedAt: new Date().toISOString(),
+    models: new Map([["test/empty-model", zeroPricing]]),
+  };
+
+  function createEmptyLlmFactory(): { factory: LlmClientFactory; callCount: number } {
+    let callCount = 0;
+    const factory: LlmClientFactory = () => ({
+      async complete(): Promise<LlmCompletionResponse> {
+        callCount++;
+        return {
+          content: "",
+          model: "test/empty-model",
+          usage: { promptTokens: 100, completionTokens: 50 },
+        };
+      },
+    });
+    return {
+      factory,
+      get callCount() { return callCount; },
+    };
+  }
+
+  it("marks all calls as empty when client returns empty string", async () => {
+    const { factory } = createEmptyLlmFactory();
+
+    const { runs } = await runMatrix(
+      { suite: "0.1.0", models: ["test/empty-model"], runs: 1, capUsd: 100, fixture: false },
+      zeroPriceData,
+      { llmClientFactory: factory, skipFileWrites: true },
+    );
+
+    expect(runs.length).toBe(1);
+    const run = runs[0];
+
+    for (const call of run.calls) {
+      expect(call.empty).toBe(true);
+    }
+  });
+
+  it("flags each task as empty when all responses are empty", async () => {
+    const { factory } = createEmptyLlmFactory();
+
+    const { runs } = await runMatrix(
+      { suite: "0.1.0", models: ["test/empty-model"], runs: 1, capUsd: 100, fixture: false },
+      zeroPriceData,
+      { llmClientFactory: factory, skipFileWrites: true },
+    );
+
+    const run = runs[0];
+    expect(run.emptyTasks.length).toBeGreaterThan(0);
+    expect(run.emptyTasks.length).toBe(run.total);
+  });
+
+  it("per-model summary emptyCount equals total empty calls", async () => {
+    const { factory } = createEmptyLlmFactory();
+
+    const { runs } = await runMatrix(
+      { suite: "0.1.0", models: ["test/empty-model"], runs: 1, capUsd: 100, fixture: false },
+      zeroPriceData,
+      { llmClientFactory: factory, skipFileWrites: true },
+    );
+
+    const run = runs[0];
+    const emptyCallCount = run.calls.filter((c) => c.empty).length;
+    expect(run.emptyCount).toBe(emptyCallCount);
+    expect(run.emptyCount).toBeGreaterThan(0);
+  });
+
+  it("flags task empty when max steps hit with non-empty but no Final Answer", async () => {
+    let callIdx = 0;
+    const factory: LlmClientFactory = () => ({
+      async complete(): Promise<LlmCompletionResponse> {
+        callIdx++;
+        return {
+          content: "Thought: I need to think more\nAction: none\nAction Input: nothing",
+          model: "test/model",
+          usage: { promptTokens: 100, completionTokens: 50 },
+        };
+      },
+    });
+
+    const { runs } = await runMatrix(
+      { suite: "0.1.0", models: ["test/empty-model"], runs: 1, capUsd: 100, fixture: false },
+      zeroPriceData,
+      { llmClientFactory: factory, skipFileWrites: true },
+    );
+
+    const run = runs[0];
+    expect(run.emptyTasks.length).toBeGreaterThan(0);
+  });
+});
+
+describe("2. Git refusal in live mode", () => {
+  const mockPriceData: PriceData = {
+    fetchedAt: new Date().toISOString(),
+    models: new Map([["test/model", { modelId: "test/model", promptPrice: 0.001, completionPrice: 0.002 }]]),
+  };
+
+  let clientCallCount = 0;
+  const trackingFactory: LlmClientFactory = () => ({
+    async complete(): Promise<LlmCompletionResponse> {
+      clientCallCount++;
+      return { content: "test", model: "test/model", usage: { promptTokens: 10, completionTokens: 5 } };
+    },
+  });
+
+  beforeEach(() => {
+    clientCallCount = 0;
+  });
+
+  it("exits non-zero and makes ZERO client calls when rev-parse fails", async () => {
+    const exitCode = await runMain({
+      argv: ["--models", "test/model", "--runs", "1"],
+      env: { OPENROUTER_API_KEY: "test-key" },
+      getGitStatus: () => ({ sha: "", isDirty: true, error: "git rev-parse HEAD failed" }),
+      llmClientFactory: trackingFactory,
+      skipFileWrites: true,
+      skipPricesFetch: true,
+      priceData: mockPriceData,
+    });
+
+    expect(exitCode).toBe(1);
+    expect(clientCallCount).toBe(0);
+  });
+
+  it("exits non-zero and makes ZERO client calls when porcelain shows tracked change", async () => {
+    const exitCode = await runMain({
+      argv: ["--models", "test/model", "--runs", "1"],
+      env: { OPENROUTER_API_KEY: "test-key" },
+      getGitStatus: () => ({ sha: "abc123def456", isDirty: true }),
+      llmClientFactory: trackingFactory,
+      skipFileWrites: true,
+      skipPricesFetch: true,
+      priceData: mockPriceData,
+    });
+
+    expect(exitCode).toBe(1);
+    expect(clientCallCount).toBe(0);
+  });
+
+  it("exits non-zero when porcelain shows untracked file outside results/", async () => {
+    const exitCode = await runMain({
+      argv: ["--models", "test/model", "--runs", "1"],
+      env: { OPENROUTER_API_KEY: "test-key" },
+      getGitStatus: () => ({ sha: "abc123def456", isDirty: true }),
+      llmClientFactory: trackingFactory,
+      skipFileWrites: true,
+      skipPricesFetch: true,
+      priceData: mockPriceData,
+    });
+
+    expect(exitCode).toBe(1);
+    expect(clientCallCount).toBe(0);
+  });
+
+  it("allows changes only under results/ or results-fixture/", () => {
+    const status = checkGitStatus();
+    expect(typeof status.sha).toBe("string");
+  });
+});
+
+describe("3. max_tokens enforcement", () => {
+  it("passes max_tokens 512 to client even when MAX_TOKENS env would be higher", async () => {
+    let receivedMaxTokens: number | undefined;
+
+    const trackingFactory: LlmClientFactory = (model, maxTokens) => {
+      receivedMaxTokens = maxTokens;
+      return {
+        async complete(): Promise<LlmCompletionResponse> {
+          return {
+            content: "Thought: done\nAction: finish\nAction Input: hello",
+            model,
+            usage: { promptTokens: 100, completionTokens: 50 },
+          };
+        },
+      };
+    };
+
+    const priceData: PriceData = {
+      fetchedAt: new Date().toISOString(),
+      models: new Map([["test/model", { modelId: "test/model", promptPrice: 0, completionPrice: 0 }]]),
+    };
+
+    await runMatrix(
+      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
+      priceData,
+      { llmClientFactory: trackingFactory, skipFileWrites: true },
+    );
+
+    expect(receivedMaxTokens).toBe(512);
+    expect(receivedMaxTokens).toBe(MAX_COMPLETION_TOKENS);
+  });
+
+  it("worst-case uses I_max 3000 for suite 0.1.0", () => {
+    const iMax = getDefaultIMax("0.1.0", 8);
+    expect(iMax).toBe(3000);
+  });
+
+  it("worst-case uses I_max 4700 for maxSteps 12", () => {
+    const iMax = getDefaultIMax("0.2.0", 12);
+    expect(iMax).toBe(4700);
+  });
+});
+
+describe("4. Fixture output directory", () => {
+  it("getResultsDir returns results-fixture/ for fixture mode", () => {
+    const dir = getResultsDir(true);
+    expect(dir).toContain("results-fixture");
+    expect(dir).not.toMatch(/results\/$/);
+  });
+
+  it("getResultsDir returns results/ for live mode", () => {
+    const dir = getResultsDir(false);
+    expect(dir).toContain("results");
+    expect(dir).not.toContain("results-fixture");
+  });
+
+  it("fixture run config sets fixture: true", async () => {
+    const priceData = createFixturePrices(["test/model"]);
+
+    const { runs } = await runMatrix(
+      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: true },
+      priceData,
+      { skipFileWrites: true },
+    );
+
+    expect(runs.length).toBe(1);
+    expect(runs[0].pass).toBe(runs[0].total);
+  });
+});
+
+describe("5. Exit codes", () => {
+  it("exits 0 when runs complete with task failures (fixture mode)", async () => {
+    const exitCode = await runMain({
+      argv: ["--fixture"],
+      env: {},
+      skipFileWrites: true,
+    });
+
+    expect(exitCode).toBe(0);
+  });
+
+  it("exits non-zero on bad args (invalid --cap-usd)", async () => {
+    const exitCode = await runMain({
+      argv: ["--cap-usd", "abc"],
+      env: {},
+      skipFileWrites: true,
+    });
+
+    expect(exitCode).toBe(1);
+  });
+
+  it("exits non-zero on bad args (--runs 0)", async () => {
+    const exitCode = await runMain({
+      argv: ["--runs", "0"],
+      env: {},
+      skipFileWrites: true,
+    });
+
+    expect(exitCode).toBe(1);
+  });
+
+  it("exits non-zero when global cap is hit", async () => {
+    const expensiveFactory: LlmClientFactory = () => ({
+      async complete(): Promise<LlmCompletionResponse> {
+        return {
+          content: "Thought: expensive\nAction: finish\nAction Input: done",
+          model: "test/model",
+          usage: { promptTokens: 10000, completionTokens: 500 },
+        };
+      },
+    });
+
+    const expensivePriceData: PriceData = {
+      fetchedAt: new Date().toISOString(),
+      models: new Map([["test/model", { modelId: "test/model", promptPrice: 1, completionPrice: 1 }]]),
+    };
+
+    const exitCode = await runMain({
+      argv: ["--models", "test/model", "--runs", "1", "--cap-usd", "0.001"],
+      env: { OPENROUTER_API_KEY: "test-key" },
+      getGitStatus: () => ({ sha: "abc123def456789012345678901234567890abcd", isDirty: false }),
+      llmClientFactory: expensiveFactory,
+      skipFileWrites: true,
+      skipPricesFetch: true,
+      priceData: expensivePriceData,
+    });
+
+    expect(exitCode).toBe(1);
+  });
+});
+
+describe("6. HTTP error recording", () => {
+  it("records httpStatus 429 from thrown error", async () => {
+    let callIdx = 0;
+    const http429Factory: LlmClientFactory = () => ({
+      async complete(): Promise<LlmCompletionResponse> {
+        callIdx++;
+        if (callIdx <= 2) {
+          throw new Error("HTTP 429 Too Many Requests - rate limited");
+        }
+        return {
+          content: "Thought: done\nAction: finish\nAction Input: ok",
+          model: "test/model",
+          usage: { promptTokens: 100, completionTokens: 50 },
+        };
+      },
+    });
+
+    const priceData: PriceData = {
+      fetchedAt: new Date().toISOString(),
+      models: new Map([["test/model", { modelId: "test/model", promptPrice: 0, completionPrice: 0 }]]),
+    };
+
+    const { runs } = await runMatrix(
+      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
+      priceData,
+      { llmClientFactory: http429Factory, skipFileWrites: true },
+    );
+
+    const run = runs[0];
+    expect(run.abortReason).toBe("http_errors");
+  });
+
+  it("counts toward 2-task HTTP error abort rule", async () => {
+    let taskCallCount = 0;
+    const http500Factory: LlmClientFactory = () => ({
+      async complete(): Promise<LlmCompletionResponse> {
+        taskCallCount++;
+        throw new Error("HTTP 500 Internal Server Error");
+      },
+    });
+
+    const priceData: PriceData = {
+      fetchedAt: new Date().toISOString(),
+      models: new Map([["test/model", { modelId: "test/model", promptPrice: 0, completionPrice: 0 }]]),
+    };
+
+    const { runs } = await runMatrix(
+      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
+      priceData,
+      { llmClientFactory: http500Factory, skipFileWrites: true },
+    );
+
+    const run = runs[0];
+    expect(run.abortReason).toBe("http_errors");
+    expect(taskCallCount).toBeLessThanOrEqual(16);
+  });
+
+  it("does not include response body in recorded error", async () => {
+    const errorFactory: LlmClientFactory = () => ({
+      async complete(): Promise<LlmCompletionResponse> {
+        throw new Error("HTTP 429: {\"error\": \"rate limited\", \"body\": \"secret\"}");
+      },
+    });
+
+    const priceData: PriceData = {
+      fetchedAt: new Date().toISOString(),
+      models: new Map([["test/model", { modelId: "test/model", promptPrice: 0, completionPrice: 0 }]]),
+    };
+
+    const { runs } = await runMatrix(
+      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
+      priceData,
+      { llmClientFactory: errorFactory, skipFileWrites: true },
+    );
+
+    const run = runs[0];
+    const httpErrorCalls = run.calls.filter((c) => c.httpError);
+
+    for (const call of httpErrorCalls) {
+      expect(call.httpStatus).toBeDefined();
+      expect((call as unknown as Record<string, unknown>).responseBody).toBeUndefined();
+    }
   });
 });

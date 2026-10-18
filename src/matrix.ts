@@ -32,6 +32,8 @@ import {
   MAX_COMPLETION_TOKENS,
   type RunResult,
   type PriceData,
+  type GitStatus,
+  type LlmClientFactory,
 } from "./matrix/index.js";
 
 interface CliArgs {
@@ -305,19 +307,33 @@ async function writeSummaryFiles(
   return { jsonPath, mdPath };
 }
 
-async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
+export interface RunMainDeps {
+  argv?: string[];
+  env?: Record<string, string | undefined>;
+  getGitStatus?: () => GitStatus;
+  llmClientFactory?: LlmClientFactory;
+  skipFileWrites?: boolean;
+  skipPricesFetch?: boolean;
+  priceData?: PriceData;
+}
+
+export async function runMain(deps: RunMainDeps = {}): Promise<number> {
+  const argv = deps.argv ?? process.argv.slice(2);
+  const env = deps.env ?? process.env;
+  const getGitStatus = deps.getGitStatus ?? checkGitStatus;
+
+  const args = parseArgs(argv);
 
   if (args.help) {
     printHelp();
-    process.exit(0);
+    return 0;
   }
 
   if (args.errors.length > 0) {
     for (const err of args.errors) {
       console.error(`Error: ${err}`);
     }
-    process.exit(1);
+    return 1;
   }
 
   let tasks;
@@ -326,28 +342,28 @@ async function main(): Promise<void> {
   } catch {
     console.error(`Error: Suite "${args.suite}" does not exist yet.`);
     console.error(`Available suites: ${Object.keys(SUITE_CONFIGS).join(", ")}`);
-    process.exit(1);
+    return 1;
   }
 
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = env.OPENROUTER_API_KEY;
 
   if (!args.fixture) {
     if (!apiKey || apiKey.trim() === "") {
       console.error("Error: Set OPENROUTER_API_KEY for live mode.");
-      process.exit(1);
+      return 1;
     }
     registerSensitiveValue(apiKey);
 
-    const gitStatus = checkGitStatus();
+    const gitStatus = getGitStatus();
     if (gitStatus.error) {
       console.error(`Error: ${gitStatus.error}`);
       console.error("Live mode requires a clean git checkout.");
-      process.exit(1);
+      return 1;
     }
     if (gitStatus.isDirty) {
       console.error("Error: Working directory has uncommitted changes.");
       console.error("Live mode requires a clean git checkout (results/ and results-fixture/ are ignored).");
-      process.exit(1);
+      return 1;
     }
     console.log(`Git SHA: ${gitStatus.sha}`);
   }
@@ -370,6 +386,8 @@ async function main(): Promise<void> {
   if (args.fixture) {
     priceData = createFixturePrices(args.models);
     console.log("Using fixture prices ($0 for all models)");
+  } else if (deps.skipPricesFetch && deps.priceData) {
+    priceData = deps.priceData;
   } else {
     console.log("Fetching model prices from OpenRouter...");
     try {
@@ -377,14 +395,14 @@ async function main(): Promise<void> {
     } catch (err) {
       const redacted = redactError(err);
       console.error(`Error fetching prices: ${redacted.message}`);
-      process.exit(1);
+      return 1;
     }
 
     const validation = validatePricesForModels(priceData, args.models);
     if (!validation.valid) {
       console.error(`Error: Missing pricing for models: ${validation.missing.join(", ")}`);
       console.error("These models may not exist or have no pricing data.");
-      process.exit(1);
+      return 1;
     }
 
     console.log(`Prices fetched at: ${priceData.fetchedAt}`);
@@ -403,28 +421,32 @@ async function main(): Promise<void> {
   };
 
   const { runs, globalAbort } = await runMatrix(config, priceData, {
-    onRunStart: (model, runN) => {
-      console.log(`Starting: ${model} run ${runN}`);
+    callbacks: {
+      onRunStart: (model, runN) => {
+        console.log(`Starting: ${model} run ${runN}`);
+      },
+      onTaskComplete: (_model, _runN, taskId, pass) => {
+        const mark = pass ? "PASS" : "FAIL";
+        console.log(`  [${mark}] ${taskId}`);
+      },
+      onRunComplete: (result) => {
+        console.log(`Completed: ${result.model} run ${result.runN} - ${result.pass}/${result.total} ($${result.costUsd.toFixed(6)})`);
+        if (result.emptyTasks.length > 0) {
+          console.log(`  Empty answers: ${result.emptyTasks.join(", ")}`);
+        }
+        if (result.abortReason) {
+          console.log(`  Aborted: ${result.abortReason}`);
+        }
+      },
+      onModelAbort: (model, reason) => {
+        console.log(`Model aborted: ${model} - ${reason}`);
+      },
+      onGlobalAbort: () => {
+        console.log("GLOBAL CAP REACHED - halting matrix");
+      },
     },
-    onTaskComplete: (_model, _runN, taskId, pass) => {
-      const mark = pass ? "PASS" : "FAIL";
-      console.log(`  [${mark}] ${taskId}`);
-    },
-    onRunComplete: (result) => {
-      console.log(`Completed: ${result.model} run ${result.runN} - ${result.pass}/${result.total} ($${result.costUsd.toFixed(6)})`);
-      if (result.emptyTasks.length > 0) {
-        console.log(`  Empty answers: ${result.emptyTasks.join(", ")}`);
-      }
-      if (result.abortReason) {
-        console.log(`  Aborted: ${result.abortReason}`);
-      }
-    },
-    onModelAbort: (model, reason) => {
-      console.log(`Model aborted: ${model} - ${reason}`);
-    },
-    onGlobalAbort: () => {
-      console.log("GLOBAL CAP REACHED - halting matrix");
-    },
+    llmClientFactory: deps.llmClientFactory,
+    skipFileWrites: deps.skipFileWrites,
   });
 
   if (globalAbort) {
@@ -433,29 +455,36 @@ async function main(): Promise<void> {
 
   printSummaryToConsole(runs, args.suite, capUsd, tasks.length);
 
-  const { jsonPath, mdPath } = await writeSummaryFiles(runs, args.suite, priceData, capUsd, globalAbort, tasks.length, args.fixture);
+  if (!deps.skipFileWrites) {
+    const { jsonPath, mdPath } = await writeSummaryFiles(runs, args.suite, priceData, capUsd, globalAbort, tasks.length, args.fixture);
 
-  console.log("\n--- Output Files ---");
-  console.log(`Summary JSON: ${jsonPath}`);
-  console.log(`Summary MD:   ${mdPath}`);
+    console.log("\n--- Output Files ---");
+    console.log(`Summary JSON: ${jsonPath}`);
+    console.log(`Summary MD:   ${mdPath}`);
 
-  const resultsDir = getResultsDir(args.fixture);
-  const resultFiles: string[] = [];
-  for (const run of runs) {
-    const sha7 = getGitSha7();
-    const fileName = `${sha7}-${sanitizeModelId(run.model)}-run${run.runN}.json`;
-    resultFiles.push(path.join(resultsDir, args.suite, fileName));
-  }
+    const resultsDir = getResultsDir(args.fixture);
+    const resultFiles: string[] = [];
+    for (const run of runs) {
+      const sha7 = getGitSha7();
+      const fileName = `${sha7}-${sanitizeModelId(run.model)}-run${run.runN}.json`;
+      resultFiles.push(path.join(resultsDir, args.suite, fileName));
+    }
 
-  console.log(`Per-run results:`);
-  for (const f of resultFiles) {
-    console.log(`  ${f}`);
+    console.log(`Per-run results:`);
+    for (const f of resultFiles) {
+      console.log(`  ${f}`);
+    }
   }
 
   if (globalAbort) {
-    process.exit(1);
+    return 1;
   }
-  process.exit(0);
+  return 0;
+}
+
+async function main(): Promise<void> {
+  const exitCode = await runMain();
+  process.exit(exitCode);
 }
 
 const isMainModule = import.meta.url === `file://${process.argv[1]}`;

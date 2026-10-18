@@ -23,6 +23,8 @@ export {
   MatrixLlmClient,
   type MatrixLlmClientConfig,
   type MatrixRunnerCallbacks,
+  type MatrixRunnerOptions,
+  type LlmClientFactory,
   type GitStatus,
 } from "./runner.js";
 

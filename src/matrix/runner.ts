@@ -208,6 +208,7 @@ async function runOneTaskWithTracking(
   ctx: RunContext,
   runCostSoFar: number,
   taskCount: number,
+  llmClientFactory?: LlmClientFactory,
 ): Promise<TaskRunResult> {
   const calls: CallResult[] = [];
   let tokensIn = 0;
@@ -248,7 +249,9 @@ async function runOneTaskWithTracking(
   }
 
   const tools = createDefaultMcpClient();
-  const baseLlm = createLlmClient({ defaultModel: ctx.model, maxTokens: MAX_COMPLETION_TOKENS });
+  const baseLlm = llmClientFactory
+    ? llmClientFactory(ctx.model, MAX_COMPLETION_TOKENS)
+    : createLlmClient({ defaultModel: ctx.model, maxTokens: MAX_COMPLETION_TOKENS });
   const agentLog: unknown[] = [];
 
   let callStep = 0;
@@ -358,11 +361,24 @@ export interface MatrixRunnerCallbacks {
   onGlobalAbort?: () => void;
 }
 
+export interface LlmClientFactory {
+  (model: string, maxTokens: number): LlmClient;
+}
+
+export interface MatrixRunnerOptions {
+  callbacks?: MatrixRunnerCallbacks;
+  llmClientFactory?: LlmClientFactory;
+  skipFileWrites?: boolean;
+}
+
 export async function runMatrix(
   config: MatrixRunConfig,
   priceData: PriceData,
-  callbacks?: MatrixRunnerCallbacks,
+  options?: MatrixRunnerOptions,
 ): Promise<{ runs: RunResult[]; globalAbort: boolean }> {
+  const callbacks = options?.callbacks;
+  const llmClientFactory = options?.llmClientFactory;
+  const skipFileWrites = options?.skipFileWrites ?? false;
   const sha = getGitSha();
   const sha7 = getGitSha7();
 
@@ -425,7 +441,7 @@ export async function runMatrix(
           break;
         }
 
-        const taskResult = await runOneTaskWithTracking(task, ctx, costUsd, taskCount);
+        const taskResult = await runOneTaskWithTracking(task, ctx, costUsd, taskCount, llmClientFactory);
 
         if (taskResult.pass) pass++;
         tokensIn += taskResult.tokensIn;
@@ -481,58 +497,60 @@ export async function runMatrix(
       runs.push(runResult);
       callbacks?.onRunComplete?.(runResult);
 
-      const resultRow: ResultRow = {
-        sha,
-        suite: config.suite,
-        model: modelId,
-        run_n: runN,
-        pass,
-        total: taskCount,
-        tokens_in: tokensIn,
-        tokens_out: tokensOut,
-        tokens_cached: tokensCached,
-        cost_usd: costUsd,
-        date: getTodayDate(),
-      };
+      if (!skipFileWrites) {
+        const resultRow: ResultRow = {
+          sha,
+          suite: config.suite,
+          model: modelId,
+          run_n: runN,
+          pass,
+          total: taskCount,
+          tokens_in: tokensIn,
+          tokens_out: tokensOut,
+          tokens_cached: tokensCached,
+          cost_usd: costUsd,
+          date: getTodayDate(),
+        };
 
-      const resultsDir = getResultsDir(config.fixture);
-      const resultPath = path.join(
-        resultsDir,
-        config.suite,
-        `${sha7}-${sanitizeModelId(modelId)}-run${runN}.json`,
-      );
-      await mkdir(path.dirname(resultPath), { recursive: true });
-      await writeFile(resultPath, JSON.stringify(resultRow, null, 2), "utf8");
+        const resultsDir = getResultsDir(config.fixture);
+        const resultPath = path.join(
+          resultsDir,
+          config.suite,
+          `${sha7}-${sanitizeModelId(modelId)}-run${runN}.json`,
+        );
+        await mkdir(path.dirname(resultPath), { recursive: true });
+        await writeFile(resultPath, JSON.stringify(resultRow, null, 2), "utf8");
 
-      const metaPath = path.join(
-        resultsDir,
-        config.suite,
-        "_meta",
-        `${sha7}-${sanitizeModelId(modelId)}-run${runN}.json`,
-      );
-      await mkdir(path.dirname(metaPath), { recursive: true });
-      await writeFile(
-        metaPath,
-        safeStringify(
-          {
-            sha,
-            suite: config.suite,
-            model: modelId,
-            run_n: runN,
-            pricesFetchedAt: priceData.fetchedAt,
-            pricing: {
-              promptPrice: pricing.promptPrice,
-              completionPrice: pricing.completionPrice,
+        const metaPath = path.join(
+          resultsDir,
+          config.suite,
+          "_meta",
+          `${sha7}-${sanitizeModelId(modelId)}-run${runN}.json`,
+        );
+        await mkdir(path.dirname(metaPath), { recursive: true });
+        await writeFile(
+          metaPath,
+          safeStringify(
+            {
+              sha,
+              suite: config.suite,
+              model: modelId,
+              run_n: runN,
+              pricesFetchedAt: priceData.fetchedAt,
+              pricing: {
+                promptPrice: pricing.promptPrice,
+                completionPrice: pricing.completionPrice,
+              },
+              emptyTasks,
+              emptyCount,
+              abortReason: modelAbortReason,
+              calls: allCalls,
             },
-            emptyTasks,
-            emptyCount,
-            abortReason: modelAbortReason,
-            calls: allCalls,
-          },
-          2,
-        ),
-        "utf8",
-      );
+            2,
+          ),
+          "utf8",
+        );
+      }
     }
 
     if (modelAbortReason && modelAbortReason !== "global_cap") {
