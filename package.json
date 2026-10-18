@@ -1,7 +1,7 @@
 {
   "name": "basilisk-eval",
   "version": "0.1.0",
-  "description": "Public Basilisk eval harness (ReAct + MCP + multi-model LLM); frozen suite + deterministic pass/N.",
+  "description": "Public eval harness (ReAct + MCP + multi-model LLM); frozen suite + deterministic pass/N.",
   "type": "module",
   "main": "dist/run.js",
   "scripts": {
