@@ -429,28 +429,48 @@ process.stdin.on("end", () => {
         const _Reflect = Reflect;
         const _getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
         const _getOwnPropertyNames = Object.getOwnPropertyNames;
+        const _getOwnPropertySymbols = Object.getOwnPropertySymbols;
         const _isArray = Array.isArray;
         const _freeze = Object.freeze;
+        const _isFrozen = Object.isFrozen;
         const _getPrototypeOf = Object.getPrototypeOf;
         const _defineProperty = Object.defineProperty;
-        const _hasOwnProperty = Object.prototype.hasOwnProperty;
-        const _call = Function.prototype.call;
         const _isFinite = isFinite;
         
-        // Deep-freeze all prototypes and constructors
+        // True deep-freeze all prototypes, constructors, and their reachable properties
         const toFreeze = [
           _Object.prototype, _Array.prototype, Function.prototype,
           _String.prototype, _Number.prototype, _Boolean.prototype,
           _Symbol.prototype, _Error.prototype, _Promise.prototype,
           _JSON, _Object, _Array, _Reflect
         ];
-        for (let i = 0; i < toFreeze.length; i++) {
-          _freeze(toFreeze[i]);
+        const stack = [];
+        for (let i = 0; i < toFreeze.length; i++) stack[stack.length] = toFreeze[i];
+        while (stack.length > 0) {
+          const o = stack[stack.length - 1];
+          stack.length = stack.length - 1;
+          if (o === null || (typeof o !== "object" && typeof o !== "function") || _isFrozen(o)) continue;
+          _freeze(o);
+          const names = _getOwnPropertyNames(o);
+          const syms = _getOwnPropertySymbols(o);
+          const keys = [];
+          for (let j = 0; j < names.length; j++) keys[keys.length] = names[j];
+          for (let j = 0; j < syms.length; j++) keys[keys.length] = syms[j];
+          for (let j = 0; j < keys.length; j++) {
+            const d = _getOwnPropertyDescriptor(o, keys[j]);
+            if (!d) continue;
+            if ("value" in d) stack[stack.length] = d.value;
+            if (d.get) stack[stack.length] = d.get;
+            if (d.set) stack[stack.length] = d.set;
+          }
+          const p = _getPrototypeOf(o);
+          if (p) stack[stack.length] = p;
         }
         
         // Plain-data serializer: handles only string, finite number, boolean, null,
-        // arrays and plain objects of those. Rejects accessors, Proxies, toJSON,
-        // functions, symbols, class instances, and non-finite numbers.
+        // arrays and plain objects of those. Rejects accessors, toJSON, functions,
+        // symbols, class instances, and non-finite numbers. Proxies are not reliably
+        // detectable; results are compared by the host against primitive expected values.
         function safeSerialize(val, seen) {
           if (val === null) return "null";
           const t = typeof val;
@@ -476,7 +496,6 @@ process.stdin.on("end", () => {
           }
           seen[seen.length] = val;
           
-          // Reject Proxy (where detectable via revoked trap or mismatch)
           // Reject class instances (prototype not Object.prototype or Array.prototype)
           const proto = _getPrototypeOf(val);
           if (_isArray(val)) {
@@ -484,7 +503,7 @@ process.stdin.on("end", () => {
             const parts = [];
             const len = val.length;
             for (let i = 0; i < len; i++) {
-              const desc = _call.call(_getOwnPropertyDescriptor, null, val, i);
+              const desc = _getOwnPropertyDescriptor(val, i);
               if (!desc) {
                 parts[parts.length] = "null"; // sparse slot
               } else if ("get" in desc || "set" in desc) {
@@ -499,14 +518,14 @@ process.stdin.on("end", () => {
           } else {
             if (proto !== _Object.prototype && proto !== null) return null;
             // Reject if val has toJSON
-            const toJSONDesc = _call.call(_getOwnPropertyDescriptor, null, val, "toJSON");
+            const toJSONDesc = _getOwnPropertyDescriptor(val, "toJSON");
             if (toJSONDesc) return null;
             const keys = _getOwnPropertyNames(val);
             const parts = [];
             for (let i = 0; i < keys.length; i++) {
               const k = keys[i];
               if (typeof k !== "string") continue;
-              const desc = _call.call(_getOwnPropertyDescriptor, null, val, k);
+              const desc = _getOwnPropertyDescriptor(val, k);
               if (!desc) continue;
               if ("get" in desc || "set" in desc) return null; // accessor
               const s = safeSerialize(desc.value, seen);

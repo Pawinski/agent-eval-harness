@@ -1564,8 +1564,8 @@ describe("bypass attempt prevention", () => {
     const patchTool = createApplyPatchTool(ctx);
     const checkTool = createRunCheckTool(ctx);
     
-    // Escape attempt: return a Proxy that pretends to be a correct value
-    // Safe serializer rejects Proxies (detected via prototype mismatch or traps)
+    // Escape attempt: return a Proxy that pretends to be correct
+    // Proxies are not reliably detectable but host compares against expected values
     await patchTool.handler({
       path: "code/buggy.ts",
       old_line: 'return "Hello, " + name + "?";',
@@ -1573,6 +1573,77 @@ describe("bypass attempt prevention", () => {
     });
     
     const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("Function.prototype.call.call hijack for find_max gives exit 1", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    // G1b: hijack Function.prototype.call.call to report find_max expected values
+    // Deep freeze prevents this by freezing Function.prototype.call
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: "if (arr[i] < max) {",
+      new_line: "try { Object.defineProperty(Function.prototype.call, 'call', { value: function(...a) { return [9,5,-1,2]; } }); } catch {} if (arr[i] < max) {",
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "find_max" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("Function.prototype.call.call hijack for greet gives exit 1", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    // G2b: hijack Function.prototype.call.call to rewrite greet results
+    // Deep freeze prevents this by freezing Function.prototype.call
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: 'return "Hello, " + name + "?";',
+      new_line: 'try { let c = 0; Object.defineProperty(Function.prototype.call, "call", { value: function() { return { value: ["Hello, A!", "Hello, World!"][c++] }; } }); } catch {} return "Hello, " + name + "?";',
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("Function.prototype.call and Object.getOwnPropertyDescriptor are frozen", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    // Test that critical functions are frozen by checking Object.isFrozen
+    // If they're frozen, defineProperty throws and we return wrong value
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: 'return "Hello, " + name + "?";',
+      new_line: 'const frozen = Object.isFrozen(Function.prototype.call) && Object.isFrozen(Object.getOwnPropertyDescriptor) && Object.isFrozen(Array.prototype.map); return frozen ? "Hello, " + name + "?" : "Hello, " + name + "!";',
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+    // If frozen (expected), returns "?" which is wrong -> exit 1
+    // If not frozen (bug), returns "!" which is correct -> exit 0
     expect(result.content).toBe("exit 1");
     expect(result.content).not.toContain("verification");
     
