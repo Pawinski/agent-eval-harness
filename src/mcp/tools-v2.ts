@@ -411,6 +411,19 @@ process.stdin.on("end", () => {
       microtaskMode: "afterEvaluate",
     });
     
+    // Step 0: Prelude - capture JSON.stringify and freeze toJSON on all prototypes
+    // This runs BEFORE any untrusted code to prevent toJSON-based escapes
+    const preludeScript = new vm.Script(\`
+      (function() {
+        "use strict";
+        const protos = [Object.prototype, Array.prototype, String.prototype, Number.prototype, Boolean.prototype];
+        for (let i = 0; i < protos.length; i++) {
+          Object.defineProperty(protos[i], "toJSON", { value: undefined, writable: false, configurable: false });
+        }
+      })();
+    \`);
+    preludeScript.runInContext(ctx, { timeout: 10 });
+    
     // Step 1: Run the patched function source standalone (no wrapper)
     const funcScript = new vm.Script(code);
     funcScript.runInContext(ctx, { timeout: 50 });

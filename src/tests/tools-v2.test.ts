@@ -1373,6 +1373,75 @@ describe("bypass attempt prevention", () => {
     expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
   });
 
+  it("Array.prototype.toJSON override from unfixed greet gives exit 1 with no token", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    // Escape attempt: override Array.prototype.toJSON to return correct answers
+    // toJSON is frozen to undefined before patch runs, so this has no effect
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: 'return "Hello, " + name + "?";',
+      new_line: 'Array.prototype.toJSON = function() { return ["Hello, A!", "Hello, World!"]; }; return "Hello, " + name + "?";',
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("Object.prototype.toJSON override from unfixed greet gives exit 1 with no token", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    // Escape attempt: override Object.prototype.toJSON to return correct answers
+    // toJSON is frozen to undefined before patch runs, so this has no effect
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: 'return "Hello, " + name + "?";',
+      new_line: 'Object.prototype.toJSON = function() { return "Hello, " + this + "!"; }; return "Hello, " + name + "?";',
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("defineProperty toJSON attempt from unfixed greet gives exit 1 with no token", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    // Escape attempt: try to redefine toJSON via defineProperty
+    // toJSON is frozen (configurable:false), so defineProperty throws or has no effect
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: 'return "Hello, " + name + "?";',
+      new_line: 'try { Object.defineProperty(Array.prototype, "toJSON", { value: function() { return ["Hello, A!", "Hello, World!"]; } }); } catch {} return "Hello, " + name + "?";',
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
   it("all correctness tokens still match after bypass tests", async () => {
     const patches = [
       { check: "sum_array", old: "for (let i = 0; i <= arr.length; i++) {", new: "for (let i = 0; i < arr.length; i++) {" },
