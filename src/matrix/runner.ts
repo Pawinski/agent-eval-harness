@@ -94,6 +94,14 @@ export function getGitSha7(): string {
   return getGitSha().slice(0, 7);
 }
 
+/** Per-run temperature status: true/false if every call agreed, "mixed" otherwise, null if no call recorded it. */
+export function summarizeTemperatureSent(calls: CallResult[]): boolean | "mixed" | null {
+  const seen = new Set(calls.map((c) => c.temperatureSent).filter((v): v is boolean => typeof v === "boolean"));
+  if (seen.size === 0) return null;
+  if (seen.size > 1) return "mixed";
+  return seen.has(true);
+}
+
 export function getResultsDir(fixture: boolean): string {
   return fixture ? RESULTS_FIXTURE_DIR : RESULTS_DIR;
 }
@@ -538,9 +546,12 @@ export async function runMatrix(
   const callsPerRun = getCallsPerRun(config.suite);
   const paramData = priceData as Partial<PriceDataWithParams>;
   const supportedParameters = config.fixture ? undefined : paramData.supportedParameters;
-  const parametersFetched: boolean | null = config.fixture ? null : paramData.parametersFetched === true;
+  const parametersFetchedAny: boolean | null = config.fixture ? null : paramData.parametersFetched === true;
 
   for (const modelId of config.models) {
+    // Per model: a missing or empty supported_parameters list means not fetched (everything is sent).
+    const parametersFetched: boolean | null =
+      parametersFetchedAny === null ? null : parametersFetchedAny && (supportedParameters?.get(modelId)?.size ?? 0) > 0;
     const pricing = priceData.models.get(modelId);
     if (!pricing) {
       throw new Error(`Missing pricing for model: ${modelId}`);
@@ -628,7 +639,7 @@ export async function runMatrix(
         allCalls.push(...taskResult.calls);
         totalRetries += taskResult.retries;
 
-        if (taskResult.empty && !taskResult.hadHttpError) {
+        if (taskResult.empty && !taskResult.hadHttpError && !taskResult.abortReason) {
           emptyTasks.push(task.id);
         }
 
@@ -665,6 +676,7 @@ export async function runMatrix(
       cumulativeCost += costUsd;
 
       const emptyCount = emptyTasks.length;
+      const temperatureSent = summarizeTemperatureSent(allCalls);
 
       const runResult: RunResult = {
         model: modelId,
@@ -681,6 +693,7 @@ export async function runMatrix(
         calls: allCalls,
         retries: totalRetries,
         parametersFetched,
+        temperatureSent,
       };
 
       runs.push(runResult);
@@ -707,8 +720,11 @@ export async function runMatrix(
           config.suite,
           `${sha7}-${sanitizeModelId(modelId)}-run${runN}.json`,
         );
-        await mkdir(path.dirname(resultPath), { recursive: true });
-        await writeFile(resultPath, JSON.stringify(resultRow, null, 2), "utf8");
+        // Aborted runs are not scored: no scored row; the _meta file below carries abortReason.
+        if (!modelAbortReason) {
+          await mkdir(path.dirname(resultPath), { recursive: true });
+          await writeFile(resultPath, JSON.stringify(resultRow, null, 2), "utf8");
+        }
 
         const metaPath = path.join(
           resultsDir,
@@ -736,6 +752,7 @@ export async function runMatrix(
               calls: allCalls,
               retries: totalRetries,
               parametersFetched,
+              temperatureSent,
             },
             2,
           ),

@@ -647,7 +647,8 @@ describe("per-task credit pre-flight", () => {
     expect(calls).toBe(56);
   });
 
-  it("opus worst case for 0.2.0 uses per-task maxSteps (118 calls)", () => {
+  it("opus worst case for 0.2.0 uses per-task maxSteps (118 calls) (FIXTURE PRICES $15/$75 per M)", () => {
+    // FIXTURE PRICES for test determinism, not real OpenRouter prices
     const opusPricing: ModelPricing = {
       modelId: "anthropic/claude-opus-5.5",
       promptPrice: 15 / 1_000_000,

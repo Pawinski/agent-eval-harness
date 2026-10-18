@@ -190,6 +190,8 @@ export interface RunResult {
   retries: number;
   /** true/false in live runs (was supported_parameters available from /models); null in fixture mode */
   parametersFetched: boolean | null;
+  /** true/false if every call agreed, "mixed" otherwise, null if no call recorded it */
+  temperatureSent?: boolean | "mixed" | null;
 }
 
 export interface MatrixResult {

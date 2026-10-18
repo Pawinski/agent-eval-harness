@@ -168,16 +168,17 @@ Examples:
 
 function formatSummaryTable(runs: RunResult[]): string {
   const lines: string[] = [];
-  lines.push("| Model | Run | Pass/N | Tokens In | Tokens Out | Cached | Cost USD | Empty | Abort |");
-  lines.push("|-------|-----|--------|-----------|------------|--------|----------|-------|-------|");
+  lines.push("| Model | Run | Pass/N | Tokens In | Tokens Out | Cached | Cost USD | Empty | Abort | Temp sent |");
+  lines.push("|-------|-----|--------|-----------|------------|--------|----------|-------|-------|-----------|");
 
   for (const run of runs) {
     const empty = run.emptyTasks.length > 0 ? run.emptyTasks.join(", ") : "-";
     const abort = run.abortReason ?? "-";
     const cached = run.tokensCached !== null ? String(run.tokensCached) : "-";
     const passStr = run.abortReason ? `not scored (${run.abortReason})` : `${run.pass}/${run.total}`;
+    const temp = run.temperatureSent === true ? "yes" : run.temperatureSent === false ? "no" : run.temperatureSent === "mixed" ? "mixed" : "-";
     lines.push(
-      `| ${run.model} | ${run.runN} | ${passStr} | ${run.tokensIn} | ${run.tokensOut} | ${cached} | $${run.costUsd.toFixed(6)} | ${empty} | ${abort} |`,
+      `| ${run.model} | ${run.runN} | ${passStr} | ${run.tokensIn} | ${run.tokensOut} | ${cached} | $${run.costUsd.toFixed(6)} | ${empty} | ${abort} | ${temp} |`,
     );
   }
 
@@ -292,8 +293,10 @@ async function writeSummaryFiles(
   for (const [model, s] of stats) {
     modelSummaries[model] = {
       passes: s.passes,
-      mean: s.mean,
-      spread: s.spread,
+      // No scored runs: mean/spread are null, not 0.
+      mean: s.passes.length > 0 ? s.mean : null,
+      spread: s.passes.length > 0 ? s.spread : null,
+      abortedRuns: s.abortedRuns,
       totalCost: s.totalCost,
       totalIn: s.totalIn,
       totalOut: s.totalOut,
@@ -320,6 +323,7 @@ async function writeSummaryFiles(
       cost_usd: r.costUsd,
       empty_tasks: r.emptyTasks,
       abort_reason: r.abortReason ?? null,
+      temperature_sent: r.temperatureSent ?? null,
     })),
     modelSummaries,
     skippedModels: skippedModels.map((s) => ({
