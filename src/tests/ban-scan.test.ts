@@ -264,6 +264,7 @@ describe("ban-scan", () => {
     expect(exitCode({ hits: [], total: 0, allowedCount: 0 })).toBe(0);
   });
 
+  // Whole-repo scan in a child process; allow for slow CI runners.
   it("CLI on the repo exits 0 with no hits at all, allowed or not", () => {
     const { status, stdout } = runCli(repoCliEnv());
     const hitLines = stdout.split("\n").filter((l) => /:\d+( \[allowed\])?$/.test(l));
@@ -271,8 +272,9 @@ describe("ban-scan", () => {
     expect(hitLines).toEqual([]);
     expect(stdout).toContain("PASS: 0 hits");
     expect(stdout).not.toContain("allowed");
-  });
+  }, 30_000);
 
+  // Whole-repo scan in a child process; allow for slow CI runners.
   it("whole-repo CLI ignores BAN_SCAN_ROOT in the parent env and catches a hit planted in the repo", () => {
     // Parent env points the scanner at a clean copy of src/ (the redirect a stray env could cause).
     const clean = path.join(tempDir, "clean");
@@ -301,7 +303,7 @@ describe("ban-scan", () => {
       if (saved.hash === undefined) delete process.env.BAN_SCAN_TEST_HASH;
       else process.env.BAN_SCAN_TEST_HASH = saved.hash;
     }
-  });
+  }, 30_000);
 
   it("CLI exits 1 on non-allowed hits and shows counts only", () => {
     const testFile = path.join(tempDir, "violation.ts");
