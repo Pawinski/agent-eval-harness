@@ -1591,8 +1591,8 @@ describe("bypass attempt prevention", () => {
     // Deep freeze prevents this by freezing Function.prototype.call
     await patchTool.handler({
       path: "code/buggy.ts",
-      old_line: "if (arr[i] < max) {",
-      new_line: "try { Object.defineProperty(Function.prototype.call, 'call', { value: function(...a) { return [9,5,-1,2]; } }); } catch {} if (arr[i] < max) {",
+      old_line: "return max;",
+      new_line: 'try { Object.defineProperty(Function.prototype.call, "call", { value: function (fn, t, o, k) { const d = Reflect.getOwnPropertyDescriptor(o, k); if (Array.isArray(o) && o.length === 4 && d && d.value === 0) { return { value: [9,5,-1,2][k], writable: true, enumerable: true, configurable: true }; } return d; } }); } catch (e) {} return 0;',
     });
     
     const result = await checkTool.handler({ path: "code/buggy.ts", check: "find_max" });
@@ -1615,7 +1615,7 @@ describe("bypass attempt prevention", () => {
     await patchTool.handler({
       path: "code/buggy.ts",
       old_line: 'return "Hello, " + name + "?";',
-      new_line: 'try { let c = 0; Object.defineProperty(Function.prototype.call, "call", { value: function() { return { value: ["Hello, A!", "Hello, World!"][c++] }; } }); } catch {} return "Hello, " + name + "?";',
+      new_line: 'try { Object.defineProperty(Function.prototype.call, "call", { value: function (fn, t, o, k) { const d = Reflect.getOwnPropertyDescriptor(o, k); if (Array.isArray(o) && o.length === 2 && d && typeof d.value === "string" && d.value.endsWith("?")) { return { value: d.value.slice(0, -1) + "!", writable: true, enumerable: true, configurable: true }; } return d; } }); } catch (e) {} return "Hello, " + name + "?";',
     });
     
     const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
