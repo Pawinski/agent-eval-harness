@@ -15,12 +15,12 @@
  */
 
 import { createHash } from "node:crypto";
-import { closeSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, "../..");
+export const ROOT = path.resolve(__dirname, "../..");
 
 /**
  * SHA256 hashes of normalized banned terms. Normalization: lowercase, keep only a-z0-9.
@@ -338,12 +338,32 @@ export function exitCode(result: ScanResult): number {
   return nonAllowed > 0 ? 1 : 0;
 }
 
+function realOrResolved(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+/** True when `dir` is this repo's root (compared by resolved real path). */
+export function isRepoRoot(dir: string): boolean {
+  return realOrResolved(dir) === realOrResolved(ROOT);
+}
+
+/**
+ * The default allowlist names specific lines of specific repo files, so it applies only
+ * when the scanned root is the repo root. Any other root gets no exemptions.
+ */
+export function allowlistFor(rootDir: string): Map<string, Set<number>> {
+  return isRepoRoot(rootDir) ? ALLOWLIST : new Map();
+}
+
 function main(): void {
   const testHash = process.env.BAN_SCAN_TEST_HASH;
   const extraHashes = testHash ? new Set([testHash]) : undefined;
   const scanRoot = process.env.BAN_SCAN_ROOT ?? ROOT;
-  // The allowlist is keyed by root-relative path, so it applies to any scan root.
-  const result = runScan(scanRoot, BANNED_HASHES, IGNORE_DIRS, ALLOWLIST, extraHashes);
+  const result = runScan(scanRoot, BANNED_HASHES, IGNORE_DIRS, allowlistFor(scanRoot), extraHashes);
   console.log(formatOutput(result));
   process.exit(exitCode(result));
 }

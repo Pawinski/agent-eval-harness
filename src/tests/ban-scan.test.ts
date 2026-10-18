@@ -4,12 +4,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   runScan,
   formatOutput,
@@ -17,7 +17,10 @@ import {
   generateCandidates,
   checkLine,
   exitCode,
+  allowlistFor,
+  isRepoRoot,
   BANNED_HASHES,
+  IGNORE_DIRS,
   SPAN_HASHES,
   ALLOWLIST,
   MIN_TERM_LEN,
@@ -34,6 +37,38 @@ const TEST_HASHES = new Set([SYNTHETIC_HASH]);
 
 function hashString(s: string): string {
   return createHash("sha256").update(s).digest("hex");
+}
+
+const SCRIPT = path.join(REPO_ROOT, "src/tests/ban-scan.ts");
+
+/**
+ * Env for a whole-repo CLI run: the inherited scan overrides are stripped so a parent
+ * BAN_SCAN_ROOT or BAN_SCAN_TEST_HASH can never redirect or widen the repo scan.
+ * Only values passed explicitly in `extra` reach the child.
+ */
+function repoCliEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.BAN_SCAN_ROOT;
+  delete env.BAN_SCAN_TEST_HASH;
+  return { ...env, ...extra };
+}
+
+function runCli(env: NodeJS.ProcessEnv): { status: number | null; stdout: string } {
+  try {
+    const stdout = execFileSync(process.execPath, ["--import", "tsx", SCRIPT], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      env,
+    });
+    return { status: 0, stdout };
+  } catch (e: unknown) {
+    const err = e as { status?: number; stdout?: string };
+    return { status: err.status ?? null, stdout: err.stdout ?? "" };
+  }
+}
+
+function allowedHitLines(): string[] {
+  return [...ALLOWLIST].flatMap(([f, ls]) => [...ls].map((l) => `${f}:${l} [allowed]`));
 }
 
 describe("ban-scan", () => {
@@ -183,26 +218,40 @@ describe("ban-scan", () => {
     writeFileSync(path.join(tempDir, rel), planted);
     const plantedLine = planted.split("\n").length - 1;
 
-    const script = path.join(REPO_ROOT, "src/tests/ban-scan.ts");
-    let status: number | null = null;
-    let stdout = "";
-    try {
-      stdout = execFileSync(process.execPath, ["--import", "tsx", script], {
-        cwd: REPO_ROOT,
-        encoding: "utf8",
-        env: { ...process.env, BAN_SCAN_ROOT: tempDir, BAN_SCAN_TEST_HASH: SYNTHETIC_HASH },
-      });
-      status = 0;
-    } catch (e: unknown) {
-      const err = e as { status?: number; stdout?: string };
-      status = err.status ?? null;
-      stdout = err.stdout ?? "";
+    // Line granularity of the default allowlist, applied explicitly to a mirror of the file.
+    const result = runScan(tempDir, BANNED_HASHES, IGNORE_DIRS, ALLOWLIST, new Set([SYNTHETIC_HASH]));
+    const allowedLines = [...(ALLOWLIST.get("src/llm/client.ts") ?? [])];
+    expect(result.hits.filter((h) => h.allowed).map((h) => h.line)).toEqual(allowedLines);
+    expect(result.hits.filter((h) => !h.allowed).map((h) => h.line)).toEqual([plantedLine]);
+    expect(formatOutput(result)).toContain("FAIL: 1 non-allowed hit(s)");
+  });
+
+  it("default allowlist applies only at the repo root (resolved real path)", () => {
+    expect(isRepoRoot(REPO_ROOT)).toBe(true);
+    expect(allowlistFor(REPO_ROOT)).toBe(ALLOWLIST);
+    expect(isRepoRoot(tempDir)).toBe(false);
+    expect(allowlistFor(tempDir).size).toBe(0);
+    // A symlink to the repo root resolves to the repo root.
+    const link = path.join(tempDir, "repo-link");
+    symlinkSync(REPO_ROOT, link, "dir");
+    expect(isRepoRoot(link)).toBe(true);
+    expect(isRepoRoot(path.join(REPO_ROOT, "src", ".."))).toBe(true);
+  });
+
+  it("CLI at a non-repo root does not apply the default allowlist", () => {
+    // Mirror the allowlisted files at their repo-relative paths under a temp root.
+    for (const rel of ALLOWLIST.keys()) {
+      mkdirSync(path.join(tempDir, path.dirname(rel)), { recursive: true });
+      cpSync(path.join(REPO_ROOT, rel), path.join(tempDir, rel));
     }
+    const { status, stdout } = runCli({ ...repoCliEnv(), BAN_SCAN_ROOT: tempDir });
+    const expected = [...ALLOWLIST].flatMap(([f, ls]) => [...ls].map((l) => `${f}:${l}`));
+    const hitLines = stdout.split("\n").filter((l) => /:\d+( \[allowed\])?$/.test(l));
 
     expect(status).toBe(1);
-    expect(stdout).toContain(`src/llm/client.ts:${plantedLine}\n`);
-    expect(stdout).toContain("FAIL: 1 non-allowed hit(s)");
-    expect(stdout.toLowerCase()).not.toContain(SYNTHETIC_TERM.toLowerCase());
+    expect(hitLines.sort()).toEqual(expected.sort());
+    expect(stdout).not.toContain("[allowed]");
+    expect(stdout).toContain(`FAIL: ${expected.length} non-allowed hit(s), 0 allowed`);
   });
 
   it("exitCode is 1 on non-allowed hits and 0 otherwise", () => {
@@ -212,15 +261,42 @@ describe("ban-scan", () => {
   });
 
   it("CLI on the repo exits 0 with exactly the allowlisted hits", () => {
-    const script = path.join(REPO_ROOT, "src/tests/ban-scan.ts");
-    const out = execFileSync(process.execPath, ["--import", "tsx", script], {
-      cwd: REPO_ROOT,
-      encoding: "utf8",
-    });
-    const expected = [...ALLOWLIST].flatMap(([f, ls]) => [...ls].map((l) => `${f}:${l} [allowed]`));
-    const hitLines = out.split("\n").filter((l) => /:\d+( \[allowed\])?$/.test(l));
+    const { status, stdout } = runCli(repoCliEnv());
+    const expected = allowedHitLines();
+    const hitLines = stdout.split("\n").filter((l) => /:\d+( \[allowed\])?$/.test(l));
+    expect(status).toBe(0);
     expect(hitLines.sort()).toEqual(expected.sort());
-    expect(out).toContain(`PASS: 0 non-allowed hits, ${expected.length} allowed`);
+    expect(stdout).toContain(`PASS: 0 non-allowed hits, ${expected.length} allowed`);
+  });
+
+  it("whole-repo CLI ignores BAN_SCAN_ROOT in the parent env and catches a hit planted in the repo", () => {
+    // Parent env points the scanner at a clean copy of src/ (the redirect a stray env could cause).
+    const clean = path.join(tempDir, "clean");
+    cpSync(path.join(REPO_ROOT, "src"), path.join(clean, "src"), { recursive: true });
+    // Token and hash are built at runtime; nothing planted exists in the repo as text.
+    const token = `zzplant${randomBytes(6).toString("hex")}zz`;
+    const plantRel = `.ban-scan-plant-${process.pid}-${randomBytes(3).toString("hex")}.txt`;
+    const plantPath = path.join(REPO_ROOT, plantRel);
+    const saved = { root: process.env.BAN_SCAN_ROOT, hash: process.env.BAN_SCAN_TEST_HASH };
+    process.env.BAN_SCAN_ROOT = clean;
+    process.env.BAN_SCAN_TEST_HASH = hashString("zzunrelatedparenthashzz");
+    try {
+      writeFileSync(plantPath, `note: ${token}\n`);
+      const { status, stdout } = runCli(repoCliEnv({ BAN_SCAN_TEST_HASH: hashString(token) }));
+      const expected = [...allowedHitLines(), `${plantRel}:1`];
+      const hitLines = stdout.split("\n").filter((l) => /:\d+( \[allowed\])?$/.test(l));
+
+      expect(status).toBe(1);
+      expect(hitLines.sort()).toEqual(expected.sort());
+      expect(stdout).toContain(`FAIL: 1 non-allowed hit(s), ${allowedHitLines().length} allowed`);
+      expect(stdout).not.toContain(token);
+    } finally {
+      rmSync(plantPath, { force: true });
+      if (saved.root === undefined) delete process.env.BAN_SCAN_ROOT;
+      else process.env.BAN_SCAN_ROOT = saved.root;
+      if (saved.hash === undefined) delete process.env.BAN_SCAN_TEST_HASH;
+      else process.env.BAN_SCAN_TEST_HASH = saved.hash;
+    }
   });
 
   it("CLI exits 1 on non-allowed hits and shows counts only", () => {
