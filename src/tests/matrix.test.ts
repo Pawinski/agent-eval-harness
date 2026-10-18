@@ -670,7 +670,15 @@ describe("CLI argument validation", () => {
     it("rejects negative for --cap-usd", () => {
       const args = parseArgs(["--cap-usd", "-5"]);
       expect(args.errors.length).toBeGreaterThan(0);
-      expect(args.errors[0]).toContain("--cap-usd requires a value");
+      expect(args.errors[0]).toContain("--cap-usd");
+      expect(args.errors[0]).toContain("greater than 0");
+    });
+
+    it("rejects trailing chars for --cap-usd", () => {
+      const args = parseArgs(["--cap-usd", "5abc"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("--cap-usd");
+      expect(args.errors[0]).toContain("finite number");
     });
   });
 
@@ -704,7 +712,15 @@ describe("CLI argument validation", () => {
     it("rejects negative for --runs", () => {
       const args = parseArgs(["--runs", "-1"]);
       expect(args.errors.length).toBeGreaterThan(0);
-      expect(args.errors[0]).toContain("--runs requires a value");
+      expect(args.errors[0]).toContain("--runs");
+      expect(args.errors[0]).toContain("at least 1");
+    });
+
+    it("rejects trailing chars for --runs", () => {
+      const args = parseArgs(["--runs", "1abc"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("--runs");
+      expect(args.errors[0]).toContain("integer");
     });
 
     it("rejects non-integer for --runs", () => {
@@ -1011,7 +1027,7 @@ describe("1. Empty responses end-to-end", () => {
     expect(run.emptyTasks.length).toBe(run.total);
   });
 
-  it("per-model summary emptyCount equals total empty calls", async () => {
+  it("per-model summary emptyCount equals total empty TASKS (not calls)", async () => {
     const { factory } = createEmptyLlmFactory();
 
     const { runs } = await runMatrix(
@@ -1021,8 +1037,8 @@ describe("1. Empty responses end-to-end", () => {
     );
 
     const run = runs[0];
-    const emptyCallCount = run.calls.filter((c) => c.empty).length;
-    expect(run.emptyCount).toBe(emptyCallCount);
+    expect(run.emptyCount).toBe(run.emptyTasks.length);
+    expect(run.emptyCount).toBeLessThanOrEqual(7);
     expect(run.emptyCount).toBeGreaterThan(0);
   });
 
@@ -1047,6 +1063,24 @@ describe("1. Empty responses end-to-end", () => {
 
     const run = runs[0];
     expect(run.emptyTasks.length).toBeGreaterThan(0);
+  });
+
+  it("excludes HTTP error tasks from empty count", async () => {
+    const httpErrorFactory: LlmClientFactory = () => ({
+      async complete(): Promise<LlmCompletionResponse> {
+        throw new Error("HTTP 500 Internal Server Error");
+      },
+    });
+
+    const { runs } = await runMatrix(
+      { suite: "0.1.0", models: ["test/empty-model"], runs: 1, capUsd: 100, fixture: false },
+      zeroPriceData,
+      { llmClientFactory: httpErrorFactory, skipFileWrites: true },
+    );
+
+    const run = runs[0];
+    expect(run.emptyTasks.length).toBe(0);
+    expect(run.emptyCount).toBe(0);
   });
 });
 
@@ -1280,6 +1314,73 @@ describe("6. HTTP error recording", () => {
 
     const run = runs[0];
     expect(run.abortReason).toBe("http_errors");
+  });
+
+  it("records 429 on the FIRST call as its own entry", async () => {
+    const http429OnFirstFactory: LlmClientFactory = () => ({
+      async complete(): Promise<LlmCompletionResponse> {
+        throw new Error("HTTP 429 Too Many Requests");
+      },
+    });
+
+    const priceData: PriceData = {
+      fetchedAt: new Date().toISOString(),
+      models: new Map([["test/model", { modelId: "test/model", promptPrice: 0, completionPrice: 0 }]]),
+    };
+
+    const { runs } = await runMatrix(
+      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
+      priceData,
+      { llmClientFactory: http429OnFirstFactory, skipFileWrites: true },
+    );
+
+    const run = runs[0];
+    const task0Calls = run.calls.filter((c) => c.taskId === "echo_hello");
+    expect(task0Calls.length).toBe(1);
+    expect(task0Calls[0].httpError).toBe(true);
+    expect(task0Calls[0].httpStatus).toBe(429);
+    expect(task0Calls[0].step).toBe(1);
+  });
+
+  it("failure on third call lands on correct entry after two successes", async () => {
+    let taskCallIdx = 0;
+    const failOnThirdFactory: LlmClientFactory = () => ({
+      async complete(): Promise<LlmCompletionResponse> {
+        taskCallIdx++;
+        if (taskCallIdx === 3) {
+          throw new Error("HTTP 500 Internal Server Error");
+        }
+        return {
+          content: "Thought: thinking\nAction: echo\nAction Input: test",
+          model: "test/model",
+          usage: { promptTokens: 100, completionTokens: 50 },
+        };
+      },
+    });
+
+    const priceData: PriceData = {
+      fetchedAt: new Date().toISOString(),
+      models: new Map([["test/model", { modelId: "test/model", promptPrice: 0, completionPrice: 0 }]]),
+    };
+
+    const { runs } = await runMatrix(
+      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
+      priceData,
+      { llmClientFactory: failOnThirdFactory, skipFileWrites: true },
+    );
+
+    const run = runs[0];
+    const httpErrorCalls = run.calls.filter((c) => c.httpError);
+
+    expect(httpErrorCalls.length).toBeGreaterThanOrEqual(1);
+    const errorCall = httpErrorCalls[0];
+    expect(errorCall.httpStatus).toBe(500);
+    expect(errorCall.step).toBe(3);
+
+    const successCalls = run.calls.filter((c) => !c.httpError);
+    for (const call of successCalls) {
+      expect(call.httpStatus).toBeUndefined();
+    }
   });
 
   it("counts toward 2-task HTTP error abort rule", async () => {
@@ -1643,7 +1744,15 @@ describe("7. Credit pre-flight", () => {
     it("rejects negative for --credit-usd", () => {
       const args = parseArgs(["--credit-usd", "-5"]);
       expect(args.errors.length).toBeGreaterThan(0);
-      expect(args.errors[0]).toContain("--credit-usd requires a value");
+      expect(args.errors[0]).toContain("--credit-usd");
+      expect(args.errors[0]).toContain("greater than 0");
+    });
+
+    it("rejects trailing chars for --credit-usd", () => {
+      const args = parseArgs(["--credit-usd", "5abc"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("--credit-usd");
+      expect(args.errors[0]).toContain("finite number");
     });
 
     it("accepts valid positive credit-usd", () => {

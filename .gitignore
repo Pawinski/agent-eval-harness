@@ -4,5 +4,4 @@ logs/
 .env
 *.log
 .DS_Store
-results/
 results-fixture/

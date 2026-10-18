@@ -8,7 +8,9 @@
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   fetchModelPrices,
   validatePricesForModels,
@@ -88,12 +90,14 @@ export function parseArgs(argv: string[]): ParsedCliArgs {
       }
     } else if (a === "--runs" || a === "-r") {
       const val = argv[++i];
-      if (val === undefined || val.startsWith("-")) {
+      if (val === undefined || val.startsWith("--")) {
         args.errors.push("--runs requires a value");
-        i--;
+        if (val !== undefined) i--;
       } else {
-        const parsed = parseInt(val, 10);
-        if (!Number.isFinite(parsed) || parsed !== parseFloat(val)) {
+        const parsed = Number(val);
+        if (!Number.isFinite(parsed)) {
+          args.errors.push(`--runs must be an integer, got: ${val}`);
+        } else if (!Number.isInteger(parsed)) {
           args.errors.push(`--runs must be an integer, got: ${val}`);
         } else if (parsed < 1) {
           args.errors.push(`--runs must be at least 1, got: ${parsed}`);
@@ -103,11 +107,11 @@ export function parseArgs(argv: string[]): ParsedCliArgs {
       }
     } else if (a === "--cap-usd" || a === "-c") {
       const val = argv[++i];
-      if (val === undefined || val.startsWith("-")) {
+      if (val === undefined || val.startsWith("--")) {
         args.errors.push("--cap-usd requires a value");
-        i--;
+        if (val !== undefined) i--;
       } else {
-        const parsed = parseFloat(val);
+        const parsed = Number(val);
         if (!Number.isFinite(parsed)) {
           args.errors.push(`--cap-usd must be a finite number, got: ${val}`);
         } else if (parsed <= 0) {
@@ -118,11 +122,11 @@ export function parseArgs(argv: string[]): ParsedCliArgs {
       }
     } else if (a === "--credit-usd") {
       const val = argv[++i];
-      if (val === undefined || val.startsWith("-")) {
+      if (val === undefined || val.startsWith("--")) {
         args.errors.push("--credit-usd requires a value");
-        i--;
+        if (val !== undefined) i--;
       } else {
-        const parsed = parseFloat(val);
+        const parsed = Number(val);
         if (!Number.isFinite(parsed)) {
           args.errors.push(`--credit-usd must be a finite number, got: ${val}`);
         } else if (parsed <= 0) {
@@ -603,8 +607,16 @@ async function main(): Promise<void> {
   process.exit(exitCode);
 }
 
-const isMainModule = import.meta.url === `file://${process.argv[1]}`;
-if (isMainModule) {
+function isMainModule(): boolean {
+  try {
+    const realArgv1 = realpathSync(process.argv[1]);
+    return import.meta.url === pathToFileURL(realArgv1).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
   main().catch((err) => {
     const redacted = redactError(err);
     console.error(redacted.message);

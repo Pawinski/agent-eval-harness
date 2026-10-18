@@ -105,12 +105,22 @@ npm run matrix -- --fixture
 
 - **Suite**: 0.1.0
 - **Runs**: 3 per model
-- **Models**: nex-agi/nex-n2.5-pro, openai/gpt-4o-mini, anthropic/claude-haiku-5.5, mistralai/mistral-large-2512, openai/gpt-6.1-sol, anthropic/claude-opus-5.5 (sorted cheapest first)
+- **Models**: nex-agi/nex-n2.5-pro, openai/gpt-4o-mini, anthropic/claude-haiku-5.5, mistralai/mistral-large-2512, openai/gpt-6.1-sol, anthropic/claude-opus-5.5 (sorted by worst-case cost)
 - **Cap**: $10.00 for 0.1.0, $35.00 for 0.2.0
+
+### Credit Pre-flight
+
+Before each model, the runner checks available credit via OpenRouter API:
+- GET `/api/v1/key` → `limit_remaining` (null = unlimited)
+- GET `/api/v1/credits` → `total_credits - total_usage`
+
+Models run in ascending full-worst-case order (runs × per-run worst case). If remaining credit is less than a model's worst case, the model is skipped cleanly (zero LLM calls).
+
+If both credit endpoints fail, the runner refuses unless `--credit-usd <n>` is given to override.
 
 ### Output
 
-Results are written to `results/<suite>/` with per-run JSON files and a summary. The runner prints the exact file paths at the end.
+Results are written to `results/<suite>/` with per-run JSON files and a summary. The runner prints the exact file paths at the end. Skipped models and top-up needed are included in the summary.
 
 ## Task IDs (suite 0.1.0)
 

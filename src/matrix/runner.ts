@@ -316,9 +316,6 @@ async function runOneTaskWithTracking(
       abortReason = err.reason;
     } else {
       hadHttpError = true;
-      if (calls.length > 0) {
-        calls[calls.length - 1].httpError = true;
-      }
       const errMsg = err instanceof Error ? err.message : String(err);
       const httpMatch = errMsg.match(/HTTP\s*(\d{3})/i);
       if (httpMatch) {
@@ -328,10 +325,21 @@ async function runOneTaskWithTracking(
       if (codeMatch) {
         errorCode = codeMatch[1].toUpperCase();
       }
-      if (calls.length > 0) {
-        calls[calls.length - 1].httpStatus = httpStatus;
-        calls[calls.length - 1].errorCode = errorCode;
-      }
+      callStep++;
+      calls.push({
+        taskId: task.id,
+        step: callStep,
+        usage: {
+          promptTokens: 0,
+          completionTokens: 0,
+          cachedTokens: null,
+          costUsd: 0,
+        },
+        empty: false,
+        httpError: true,
+        httpStatus,
+        errorCode,
+      });
     }
   }
 
@@ -490,7 +498,7 @@ export async function runMatrix(
         costUsd += taskResult.costUsd;
         allCalls.push(...taskResult.calls);
 
-        if (taskResult.empty) {
+        if (taskResult.empty && !taskResult.hadHttpError) {
           emptyTasks.push(task.id);
         }
 
@@ -515,7 +523,7 @@ export async function runMatrix(
 
       cumulativeCost += costUsd;
 
-      const emptyCount = allCalls.filter((c) => c.empty).length;
+      const emptyCount = emptyTasks.length;
 
       const runResult: RunResult = {
         model: modelId,
