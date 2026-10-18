@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -150,6 +150,59 @@ describe("ban-scan", () => {
     writeFileSync(path.join(tempDir, "conf.yaml"), `key: ${SYNTHETIC_TERM}\n`);
     const result = runScan(tempDir, TEST_HASHES, undefined, new Map());
     expect(result.hits.map((h) => h.path).sort()).toEqual(["ci.yml", "conf.yaml"]);
+  });
+
+  for (const ext of [".mjs", ".cjs", ".sh", ".html", ".tsx", ".jsx"]) {
+    it(`scans ${ext} files`, () => {
+      writeFileSync(path.join(tempDir, `canary${ext}`), `x = "${SYNTHETIC_TERM}"\n`);
+      const result = runScan(tempDir, TEST_HASHES, undefined, new Map());
+      expect(result.hits.map((h) => h.path)).toEqual([`canary${ext}`]);
+    });
+  }
+
+  it("scans extensionless text files", () => {
+    writeFileSync(path.join(tempDir, "Dockerfile"), `LABEL x="${SYNTHETIC_TERM}"\n`);
+    const result = runScan(tempDir, TEST_HASHES, undefined, new Map());
+    expect(result.hits.map((h) => h.path)).toEqual(["Dockerfile"]);
+  });
+
+  it("skips extensionless binary files", () => {
+    writeFileSync(
+      path.join(tempDir, "blob"),
+      Buffer.concat([Buffer.from([0, 1, 2]), Buffer.from(`${SYNTHETIC_TERM}\n`)]),
+    );
+    const result = runScan(tempDir, TEST_HASHES, undefined, new Map());
+    expect(result.total).toBe(0);
+  });
+
+  it("default allowlist does not exempt other lines of the real client.ts", () => {
+    const rel = path.join("src", "llm", "client.ts");
+    mkdirSync(path.join(tempDir, "src", "llm"), { recursive: true });
+    const original = readFileSync(path.join(REPO_ROOT, rel), "utf8");
+    const planted = `${original.replace(/\n?$/, "\n")}// ${SYNTHETIC_TERM}\n`;
+    writeFileSync(path.join(tempDir, rel), planted);
+    const plantedLine = planted.split("\n").length - 1;
+
+    const script = path.join(REPO_ROOT, "src/tests/ban-scan.ts");
+    let status: number | null = null;
+    let stdout = "";
+    try {
+      stdout = execFileSync(process.execPath, ["--import", "tsx", script], {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        env: { ...process.env, BAN_SCAN_ROOT: tempDir, BAN_SCAN_TEST_HASH: SYNTHETIC_HASH },
+      });
+      status = 0;
+    } catch (e: unknown) {
+      const err = e as { status?: number; stdout?: string };
+      status = err.status ?? null;
+      stdout = err.stdout ?? "";
+    }
+
+    expect(status).toBe(1);
+    expect(stdout).toContain(`src/llm/client.ts:${plantedLine}\n`);
+    expect(stdout).toContain("FAIL: 1 non-allowed hit(s)");
+    expect(stdout.toLowerCase()).not.toContain(SYNTHETIC_TERM.toLowerCase());
   });
 
   it("exitCode is 1 on non-allowed hits and 0 otherwise", () => {

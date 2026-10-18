@@ -15,7 +15,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -60,7 +60,22 @@ export const ALLOWLIST: Map<string, Set<number>> = new Map([
   ["src/tests/payload-identity.test.ts", new Set([77])],
 ]);
 
-export const SCAN_EXTENSIONS = [".ts", ".js", ".json", ".md", ".txt", ".env", ".yml", ".yaml"];
+export const SCAN_EXTENSIONS = [
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".json",
+  ".md",
+  ".txt",
+  ".env",
+  ".yml",
+  ".yaml",
+  ".sh",
+  ".html",
+];
 export const IGNORE_DIRS = ["node_modules", ".git", "dist", "logs"];
 
 function normalize(s: string): string {
@@ -198,6 +213,21 @@ export function checkLine(
   return false;
 }
 
+/**
+ * Extensionless files (e.g. Dockerfile, LICENSE, .gitignore, shell scripts without a suffix)
+ * are scanned when they look like text: no NUL byte in the first 8 KiB.
+ */
+export function isTextFile(filePath: string): boolean {
+  const fd = openSync(filePath, "r");
+  try {
+    const buf = Buffer.alloc(8192);
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    return !buf.subarray(0, n).includes(0);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export function scanDir(
   dir: string,
   ignoreDirs: string[] = IGNORE_DIRS,
@@ -214,7 +244,11 @@ export function scanDir(
       files.push(...scanDir(fullPath, ignoreDirs));
     } else if (stat.isFile()) {
       const ext = path.extname(entry);
-      if (SCAN_EXTENSIONS.includes(ext) || entry === ".env.example") {
+      if (
+        SCAN_EXTENSIONS.includes(ext) ||
+        entry === ".env.example" ||
+        (ext === "" && isTextFile(fullPath))
+      ) {
         files.push(fullPath);
       }
     }
@@ -308,8 +342,8 @@ function main(): void {
   const testHash = process.env.BAN_SCAN_TEST_HASH;
   const extraHashes = testHash ? new Set([testHash]) : undefined;
   const scanRoot = process.env.BAN_SCAN_ROOT ?? ROOT;
-  const allowlist = process.env.BAN_SCAN_ROOT ? new Map() : ALLOWLIST;
-  const result = runScan(scanRoot, BANNED_HASHES, IGNORE_DIRS, allowlist, extraHashes);
+  // The allowlist is keyed by root-relative path, so it applies to any scan root.
+  const result = runScan(scanRoot, BANNED_HASHES, IGNORE_DIRS, ALLOWLIST, extraHashes);
   console.log(formatOutput(result));
   process.exit(exitCode(result));
 }

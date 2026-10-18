@@ -181,7 +181,6 @@ See `.env.example`:
 - `OPENROUTER_BASE_URL` — optional API base override
 - `MAX_TOKENS` — max tokens per completion (default 512)
 - `AGENT_EVAL_CACHE_BREAKPOINT` — enable cache breakpoint (default off)
-  - The previous variable name still works but prints a deprecation warning.
 
 ## License
 
