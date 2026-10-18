@@ -1,0 +1,786 @@
+{
+  "sha": "6d216f5e0c9f44d0be5d248f539adc1e638813ed",
+  "suite": "0.2.0",
+  "model": "openai/gpt-6.1-sol",
+  "run_n": 2,
+  "pricesFetchedAt": "2026-10-18T09:46:22.465Z",
+  "pricing": {
+    "promptPrice": 0.000002,
+    "completionPrice": 0.00001
+  },
+  "emptyTasks": [],
+  "emptyCount": 0,
+  "calls": [
+    {
+      "taskId": "chain_json_regex_add",
+      "step": 1,
+      "usage": {
+        "promptTokens": 502,
+        "completionTokens": 223,
+        "cachedTokens": 0,
+        "costUsd": 0.003234
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "chain_json_regex_add",
+      "step": 2,
+      "usage": {
+        "promptTokens": 722,
+        "completionTokens": 46,
+        "cachedTokens": 0,
+        "costUsd": 0.0019039999999999999
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "chain_word_count_multiply",
+      "step": 1,
+      "usage": {
+        "promptTokens": 466,
+        "completionTokens": 115,
+        "cachedTokens": 0,
+        "costUsd": 0.002082
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "chain_word_count_multiply",
+      "step": 2,
+      "usage": {
+        "promptTokens": 539,
+        "completionTokens": 41,
+        "cachedTokens": 0,
+        "costUsd": 0.001488
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "chain_extract_sum",
+      "step": 1,
+      "usage": {
+        "promptTokens": 488,
+        "completionTokens": 356,
+        "cachedTokens": 0,
+        "costUsd": 0.004536
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "chain_extract_sum",
+      "step": 2,
+      "usage": {
+        "promptTokens": 761,
+        "completionTokens": 63,
+        "cachedTokens": 0,
+        "costUsd": 0.002152
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "chain_extract_sum",
+      "step": 3,
+      "usage": {
+        "promptTokens": 820,
+        "completionTokens": 30,
+        "cachedTokens": 0,
+        "costUsd": 0.0019399999999999999
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "chain_extract_sum",
+      "step": 4,
+      "usage": {
+        "promptTokens": 587,
+        "completionTokens": 20,
+        "cachedTokens": 0,
+        "costUsd": 0.001374
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "select_echo_tool",
+      "step": 1,
+      "usage": {
+        "promptTokens": 444,
+        "completionTokens": 83,
+        "cachedTokens": 0,
+        "costUsd": 0.0017180000000000001
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "select_echo_tool",
+      "step": 2,
+      "usage": {
+        "promptTokens": 511,
+        "completionTokens": 22,
+        "cachedTokens": 0,
+        "costUsd": 0.0012419999999999998
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "select_add_tool",
+      "step": 1,
+      "usage": {
+        "promptTokens": 438,
+        "completionTokens": 71,
+        "cachedTokens": 0,
+        "costUsd": 0.001586
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "select_add_tool",
+      "step": 2,
+      "usage": {
+        "promptTokens": 496,
+        "completionTokens": 20,
+        "cachedTokens": 0,
+        "costUsd": 0.0011920000000000001
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "select_json_tool",
+      "step": 1,
+      "usage": {
+        "promptTokens": 453,
+        "completionTokens": 97,
+        "cachedTokens": 0,
+        "costUsd": 0.001876
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "select_json_tool",
+      "step": 2,
+      "usage": {
+        "promptTokens": 523,
+        "completionTokens": 19,
+        "cachedTokens": 0,
+        "costUsd": 0.0012360000000000001
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "code_compute_result",
+      "step": 1,
+      "usage": {
+        "promptTokens": 206,
+        "completionTokens": 205,
+        "cachedTokens": 0,
+        "costUsd": 0.002462
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "code_compute_result",
+      "step": 2,
+      "usage": {
+        "promptTokens": 673,
+        "completionTokens": 31,
+        "cachedTokens": 0,
+        "costUsd": 0.001656
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "code_find_throw",
+      "step": 1,
+      "usage": {
+        "promptTokens": 210,
+        "completionTokens": 213,
+        "cachedTokens": 0,
+        "costUsd": 0.00255
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "code_find_throw",
+      "step": 2,
+      "usage": {
+        "promptTokens": 591,
+        "completionTokens": 24,
+        "cachedTokens": 0,
+        "costUsd": 0.0014219999999999999
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "code_validate_email",
+      "step": 1,
+      "usage": {
+        "promptTokens": 214,
+        "completionTokens": 191,
+        "cachedTokens": 0,
+        "costUsd": 0.0023380000000000002
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "code_validate_email",
+      "step": 2,
+      "usage": {
+        "promptTokens": 299,
+        "completionTokens": 58,
+        "cachedTokens": 0,
+        "costUsd": 0.001178
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "code_validate_email",
+      "step": 3,
+      "usage": {
+        "promptTokens": 821,
+        "completionTokens": 26,
+        "cachedTokens": 0,
+        "costUsd": 0.001902
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "patch_sum_array",
+      "step": 1,
+      "usage": {
+        "promptTokens": 318,
+        "completionTokens": 165,
+        "cachedTokens": 0,
+        "costUsd": 0.0022860000000000003
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "patch_sum_array",
+      "step": 2,
+      "usage": {
+        "promptTokens": 655,
+        "completionTokens": 80,
+        "cachedTokens": 0,
+        "costUsd": 0.00211
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "patch_sum_array",
+      "step": 3,
+      "usage": {
+        "promptTokens": 745,
+        "completionTokens": 37,
+        "cachedTokens": 0,
+        "costUsd": 0.00186
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "patch_sum_array",
+      "step": 4,
+      "usage": {
+        "promptTokens": 467,
+        "completionTokens": 25,
+        "cachedTokens": 0,
+        "costUsd": 0.001184
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "patch_find_max",
+      "step": 1,
+      "usage": {
+        "promptTokens": 315,
+        "completionTokens": 155,
+        "cachedTokens": 0,
+        "costUsd": 0.00218
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "patch_find_max",
+      "step": 2,
+      "usage": {
+        "promptTokens": 646,
+        "completionTokens": 64,
+        "cachedTokens": 0,
+        "costUsd": 0.0019320000000000001
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "patch_find_max",
+      "step": 3,
+      "usage": {
+        "promptTokens": 720,
+        "completionTokens": 40,
+        "cachedTokens": 0,
+        "costUsd": 0.0018399999999999998
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "patch_find_max",
+      "step": 4,
+      "usage": {
+        "promptTokens": 447,
+        "completionTokens": 26,
+        "cachedTokens": 0,
+        "costUsd": 0.001154
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "patch_greet",
+      "step": 1,
+      "usage": {
+        "promptTokens": 310,
+        "completionTokens": 134,
+        "cachedTokens": 0,
+        "costUsd": 0.00196
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "patch_greet",
+      "step": 2,
+      "usage": {
+        "promptTokens": 398,
+        "completionTokens": 60,
+        "cachedTokens": 0,
+        "costUsd": 0.001396
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "patch_greet",
+      "step": 3,
+      "usage": {
+        "promptTokens": 700,
+        "completionTokens": 67,
+        "cachedTokens": 0,
+        "costUsd": 0.00207
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "patch_greet",
+      "step": 4,
+      "usage": {
+        "promptTokens": 689,
+        "completionTokens": 39,
+        "cachedTokens": 0,
+        "costUsd": 0.001768
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "patch_greet",
+      "step": 5,
+      "usage": {
+        "promptTokens": 444,
+        "completionTokens": 22,
+        "cachedTokens": 0,
+        "costUsd": 0.001108
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "data_inventory_sum",
+      "step": 1,
+      "usage": {
+        "promptTokens": 231,
+        "completionTokens": 199,
+        "cachedTokens": 0,
+        "costUsd": 0.002452
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "data_inventory_sum",
+      "step": 2,
+      "usage": {
+        "promptTokens": 338,
+        "completionTokens": 24,
+        "cachedTokens": 0,
+        "costUsd": 0.0009159999999999999
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "data_weather_avg",
+      "step": 1,
+      "usage": {
+        "promptTokens": 238,
+        "completionTokens": 255,
+        "cachedTokens": 0,
+        "costUsd": 0.003026
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "data_weather_avg",
+      "step": 2,
+      "usage": {
+        "promptTokens": 381,
+        "completionTokens": 141,
+        "cachedTokens": 0,
+        "costUsd": 0.002172
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "data_weather_avg",
+      "step": 3,
+      "usage": {
+        "promptTokens": 483,
+        "completionTokens": 83,
+        "cachedTokens": 0,
+        "costUsd": 0.001796
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "data_weather_avg",
+      "step": 4,
+      "usage": {
+        "promptTokens": 402,
+        "completionTokens": 30,
+        "cachedTokens": 0,
+        "costUsd": 0.001104
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "error_recovery_sum",
+      "step": 1,
+      "usage": {
+        "promptTokens": 215,
+        "completionTokens": 132,
+        "cachedTokens": 0,
+        "costUsd": 0.0017500000000000003
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "error_recovery_sum",
+      "step": 2,
+      "usage": {
+        "promptTokens": 341,
+        "completionTokens": 69,
+        "cachedTokens": 0,
+        "costUsd": 0.001372
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "error_recovery_sum",
+      "step": 3,
+      "usage": {
+        "promptTokens": 391,
+        "completionTokens": 31,
+        "cachedTokens": 0,
+        "costUsd": 0.0010919999999999999
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "error_recovery_sum",
+      "step": 4,
+      "usage": {
+        "promptTokens": 306,
+        "completionTokens": 21,
+        "cachedTokens": 0,
+        "costUsd": 0.000822
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "error_recovery_lookup",
+      "step": 1,
+      "usage": {
+        "promptTokens": 218,
+        "completionTokens": 169,
+        "cachedTokens": 0,
+        "costUsd": 0.0021260000000000003
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "error_recovery_lookup",
+      "step": 2,
+      "usage": {
+        "promptTokens": 360,
+        "completionTokens": 62,
+        "cachedTokens": 0,
+        "costUsd": 0.00134
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "error_recovery_lookup",
+      "step": 3,
+      "usage": {
+        "promptTokens": 404,
+        "completionTokens": 29,
+        "cachedTokens": 0,
+        "costUsd": 0.001098
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    },
+    {
+      "taskId": "error_recovery_lookup",
+      "step": 4,
+      "usage": {
+        "promptTokens": 301,
+        "completionTokens": 19,
+        "cachedTokens": 0,
+        "costUsd": 0.000792
+      },
+      "empty": false,
+      "httpError": false,
+      "droppedParameters": [
+        "temperature"
+      ],
+      "temperatureSent": false
+    }
+  ],
+  "retries": 0,
+  "parametersFetched": true,
+  "temperatureSent": false
+}

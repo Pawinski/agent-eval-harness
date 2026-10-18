@@ -1,0 +1,51 @@
+{
+  "sha": "6d216f5e0c9f44d0be5d248f539adc1e638813ed",
+  "suite": "0.2.0",
+  "model": "anthropic/claude-opus-5.5",
+  "run_n": 1,
+  "pricesFetchedAt": "2026-10-18T09:46:22.465Z",
+  "pricing": {
+    "promptPrice": 0.000004,
+    "completionPrice": 0.00002
+  },
+  "emptyTasks": [],
+  "emptyCount": 0,
+  "abortReason": "http_errors",
+  "calls": [
+    {
+      "taskId": "chain_json_regex_add",
+      "step": 1,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "cachedTokens": null,
+        "costUsd": 0
+      },
+      "empty": false,
+      "httpError": true,
+      "errorCode": "missing_usage",
+      "providerError": {
+        "code": "missing_usage"
+      }
+    },
+    {
+      "taskId": "chain_word_count_multiply",
+      "step": 1,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "cachedTokens": null,
+        "costUsd": 0
+      },
+      "empty": false,
+      "httpError": true,
+      "errorCode": "missing_usage",
+      "providerError": {
+        "code": "missing_usage"
+      }
+    }
+  ],
+  "retries": 0,
+  "parametersFetched": true,
+  "temperatureSent": null
+}

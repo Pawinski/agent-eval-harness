@@ -1,0 +1,13 @@
+{
+  "sha": "6d216f5e0c9f44d0be5d248f539adc1e638813ed",
+  "suite": "0.2.0",
+  "model": "nex-agi/nex-n2.5-pro",
+  "run_n": 2,
+  "pass": 15,
+  "total": 16,
+  "tokens_in": 39122,
+  "tokens_out": 5934,
+  "tokens_cached": 14592,
+  "cost_usd": 0.00441765,
+  "date": "2026-10-18"
+}

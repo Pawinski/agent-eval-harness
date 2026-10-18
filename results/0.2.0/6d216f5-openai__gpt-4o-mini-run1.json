@@ -1,0 +1,13 @@
+{
+  "sha": "6d216f5e0c9f44d0be5d248f539adc1e638813ed",
+  "suite": "0.2.0",
+  "model": "openai/gpt-4o-mini",
+  "run_n": 1,
+  "pass": 15,
+  "total": 16,
+  "tokens_in": 24293,
+  "tokens_out": 2327,
+  "tokens_cached": 0,
+  "cost_usd": 0.00504015,
+  "date": "2026-10-18"
+}

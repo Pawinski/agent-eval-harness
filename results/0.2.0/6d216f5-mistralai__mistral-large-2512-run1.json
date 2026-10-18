@@ -1,0 +1,13 @@
+{
+  "sha": "6d216f5e0c9f44d0be5d248f539adc1e638813ed",
+  "suite": "0.2.0",
+  "model": "mistralai/mistral-large-2512",
+  "run_n": 1,
+  "pass": 15,
+  "total": 16,
+  "tokens_in": 25743,
+  "tokens_out": 4414,
+  "tokens_cached": 13056,
+  "cost_usd": 0.019492499999999996,
+  "date": "2026-10-18"
+}

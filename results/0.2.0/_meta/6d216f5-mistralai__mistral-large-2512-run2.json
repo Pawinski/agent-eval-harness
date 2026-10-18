@@ -1,0 +1,58 @@
+{
+  "sha": "6d216f5e0c9f44d0be5d248f539adc1e638813ed",
+  "suite": "0.2.0",
+  "model": "mistralai/mistral-large-2512",
+  "run_n": 2,
+  "pricesFetchedAt": "2026-10-18T09:46:22.465Z",
+  "pricing": {
+    "promptPrice": 5e-7,
+    "completionPrice": 0.0000015
+  },
+  "emptyTasks": [],
+  "emptyCount": 0,
+  "abortReason": "rate_limited",
+  "calls": [
+    {
+      "taskId": "chain_json_regex_add",
+      "step": 1,
+      "usage": {
+        "promptTokens": 518,
+        "completionTokens": 271,
+        "cachedTokens": 128,
+        "costUsd": 0.0006655000000000001
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "chain_json_regex_add",
+      "step": 2,
+      "usage": {
+        "promptTokens": 806,
+        "completionTokens": 46,
+        "cachedTokens": 512,
+        "costUsd": 0.000472
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "chain_word_count_multiply",
+      "step": 1,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "cachedTokens": null,
+        "costUsd": 0
+      },
+      "empty": false,
+      "httpError": false,
+      "retries": 3
+    }
+  ],
+  "retries": 3,
+  "parametersFetched": true,
+  "temperatureSent": true
+}
