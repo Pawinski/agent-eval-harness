@@ -27,12 +27,14 @@ import {
   type MatrixRunConfig,
   type ResultRow,
   type RunResult,
+  type SkippedModel,
   MatrixAbort,
   SUITE_CONFIGS,
   getDefaultIMax,
   getDefaultMaxInputTokens,
   getSuiteTasks,
 } from "./types.js";
+import { calculateModelFullWorstCase } from "./prices.js";
 import { safeStringify } from "./redact.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -358,6 +360,7 @@ export interface MatrixRunnerCallbacks {
   onTaskComplete?: (model: string, runN: number, taskId: string, pass: boolean) => void;
   onRunComplete?: (result: RunResult) => void;
   onModelAbort?: (model: string, reason: AbortReason) => void;
+  onModelSkipped?: (model: string, worstCase: number, remaining: number, shortfall: number) => void;
   onGlobalAbort?: () => void;
 }
 
@@ -365,20 +368,33 @@ export interface LlmClientFactory {
   (model: string, maxTokens: number): LlmClient;
 }
 
+export interface CreditProvider {
+  (): Promise<number | null>;
+}
+
 export interface MatrixRunnerOptions {
   callbacks?: MatrixRunnerCallbacks;
   llmClientFactory?: LlmClientFactory;
   skipFileWrites?: boolean;
+  creditProvider?: CreditProvider;
+}
+
+export interface MatrixRunResult {
+  runs: RunResult[];
+  globalAbort: boolean;
+  skippedModels: SkippedModel[];
+  topUpNeeded: number;
 }
 
 export async function runMatrix(
   config: MatrixRunConfig,
   priceData: PriceData,
   options?: MatrixRunnerOptions,
-): Promise<{ runs: RunResult[]; globalAbort: boolean }> {
+): Promise<MatrixRunResult> {
   const callbacks = options?.callbacks;
   const llmClientFactory = options?.llmClientFactory;
   const skipFileWrites = options?.skipFileWrites ?? false;
+  const creditProvider = options?.creditProvider;
   const sha = getGitSha();
   const sha7 = getGitSha7();
 
@@ -397,6 +413,7 @@ export async function runMatrix(
   const iMax = getDefaultIMax(config.suite, maxSteps);
 
   const runs: RunResult[] = [];
+  const skippedModels: SkippedModel[] = [];
   let cumulativeCost = 0;
   let globalAbort = false;
 
@@ -404,6 +421,27 @@ export async function runMatrix(
     const pricing = priceData.models.get(modelId);
     if (!pricing) {
       throw new Error(`Missing pricing for model: ${modelId}`);
+    }
+
+    const modelFullWorstCase = calculateModelFullWorstCase(
+      config.runs,
+      taskCount,
+      maxSteps,
+      iMax,
+      pricing,
+    );
+
+    if (creditProvider && !config.fixture) {
+      const credit = await creditProvider();
+      const remainingCap = (config.capUsd ?? Infinity) - cumulativeCost;
+      const remaining = credit !== null ? Math.min(credit, remainingCap) : remainingCap;
+
+      if (remaining < modelFullWorstCase) {
+        const shortfall = modelFullWorstCase - remaining;
+        skippedModels.push({ model: modelId, worstCase: modelFullWorstCase, remaining, shortfall });
+        callbacks?.onModelSkipped?.(modelId, modelFullWorstCase, remaining, shortfall);
+        continue;
+      }
     }
 
     let modelAbortReason: AbortReason | undefined;
@@ -558,5 +596,10 @@ export async function runMatrix(
     }
   }
 
-  return { runs, globalAbort };
+  // Top-up needed formula:
+  // sum of (skipped model worst case - remaining credit at time of skip), floored at 0
+  // This equals the sum of shortfalls since shortfall = worstCase - remaining
+  const topUpNeeded = Math.max(0, skippedModels.reduce((sum, m) => sum + m.shortfall, 0));
+
+  return { runs, globalAbort, skippedModels, topUpNeeded };
 }

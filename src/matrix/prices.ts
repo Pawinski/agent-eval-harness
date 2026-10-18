@@ -132,3 +132,94 @@ export function createFixturePrices(models: string[]): FixturePriceData {
     fixture: true,
   };
 }
+
+export interface CreditCheckResult {
+  limitRemaining: number | null;
+  availableCredits: number | null;
+  keyError: boolean;
+  creditsError: boolean;
+}
+
+interface KeyResponse {
+  data?: {
+    limit_remaining?: number | null;
+  };
+}
+
+interface CreditsResponse {
+  data?: {
+    total_credits?: number;
+    total_usage?: number;
+  };
+}
+
+export async function fetchCreditInfo(apiKey: string): Promise<CreditCheckResult> {
+  const headers = { Authorization: `Bearer ${apiKey}` };
+  let limitRemaining: number | null = null;
+  let availableCredits: number | null = null;
+  let keyError = false;
+  let creditsError = false;
+
+  try {
+    const keyRes = await fetch("https://openrouter.ai/api/v1/key", { headers });
+    if (keyRes.ok) {
+      const json = (await keyRes.json()) as KeyResponse;
+      limitRemaining = json.data?.limit_remaining ?? null;
+    } else {
+      keyError = true;
+    }
+  } catch {
+    keyError = true;
+  }
+
+  try {
+    const creditsRes = await fetch("https://openrouter.ai/api/v1/credits", { headers });
+    if (creditsRes.ok) {
+      const json = (await creditsRes.json()) as CreditsResponse;
+      const total = json.data?.total_credits ?? 0;
+      const used = json.data?.total_usage ?? 0;
+      availableCredits = total - used;
+    } else {
+      creditsError = true;
+    }
+  } catch {
+    creditsError = true;
+  }
+
+  return { limitRemaining, availableCredits, keyError, creditsError };
+}
+
+export function calculateModelFullWorstCase(
+  runs: number,
+  taskCount: number,
+  maxSteps: number,
+  iMax: number,
+  pricing: ModelPricing,
+): number {
+  const callsPerRun = taskCount * maxSteps;
+  const outputTokens = 512;
+  return runs * calculateWorstCaseCost(callsPerRun, iMax, outputTokens, pricing);
+}
+
+export function sortModelsByFullWorstCase(
+  models: string[],
+  priceData: PriceData,
+  runs: number,
+  taskCount: number,
+  maxSteps: number,
+  iMax: number,
+): string[] {
+  return [...models].sort((a, b) => {
+    const priceA = priceData.models.get(a);
+    const priceB = priceData.models.get(b);
+
+    if (!priceA && !priceB) return 0;
+    if (!priceA) return 1;
+    if (!priceB) return -1;
+
+    const costA = calculateModelFullWorstCase(runs, taskCount, maxSteps, iMax, priceA);
+    const costB = calculateModelFullWorstCase(runs, taskCount, maxSteps, iMax, priceB);
+
+    return costA - costB;
+  });
+}

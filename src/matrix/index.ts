@@ -9,6 +9,10 @@ export {
   calculateWorstCaseCost,
   createFixturePrices,
   sortModelsByCost,
+  fetchCreditInfo,
+  calculateModelFullWorstCase,
+  sortModelsByFullWorstCase,
+  type CreditCheckResult,
 } from "./prices.js";
 
 export {
@@ -24,7 +28,9 @@ export {
   type MatrixLlmClientConfig,
   type MatrixRunnerCallbacks,
   type MatrixRunnerOptions,
+  type MatrixRunResult,
   type LlmClientFactory,
+  type CreditProvider,
   type GitStatus,
 } from "./runner.js";
 
@@ -38,6 +44,7 @@ export {
   type AbortReason,
   type RunResult,
   type ResultRow,
+  type SkippedModel,
   MatrixAbort,
   SUITE_CONFIGS,
   DEFAULT_MODELS,

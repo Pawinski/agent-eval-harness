@@ -1334,3 +1334,364 @@ describe("6. HTTP error recording", () => {
     }
   });
 });
+
+// ====================
+// CREDIT PRE-FLIGHT TESTS
+// ====================
+
+describe("7. Credit pre-flight", () => {
+  const expensivePricing: ModelPricing = {
+    modelId: "expensive/model",
+    promptPrice: 0.01,
+    completionPrice: 0.02,
+  };
+  const cheapPricing: ModelPricing = {
+    modelId: "cheap/model",
+    promptPrice: 0.0001,
+    completionPrice: 0.0002,
+  };
+
+  const testPriceData: PriceData = {
+    fetchedAt: new Date().toISOString(),
+    models: new Map([
+      ["expensive/model", expensivePricing],
+      ["cheap/model", cheapPricing],
+    ]),
+  };
+
+  function createTrackingFactory(): { factory: LlmClientFactory; getCallsPerModel: () => Map<string, number> } {
+    const callsPerModel = new Map<string, number>();
+    const factory: LlmClientFactory = (model) => ({
+      async complete(): Promise<LlmCompletionResponse> {
+        callsPerModel.set(model, (callsPerModel.get(model) ?? 0) + 1);
+        return {
+          content: "Thought: done\nAction: finish\nAction Input: hello",
+          model,
+          usage: { promptTokens: 100, completionTokens: 50 },
+        };
+      },
+    });
+    return { factory, getCallsPerModel: () => callsPerModel };
+  }
+
+  it("runs models in ascending worst-case order via runMain", async () => {
+    const modelOrder: string[] = [];
+    const trackingFactory: LlmClientFactory = (model) => ({
+      async complete(): Promise<LlmCompletionResponse> {
+        if (!modelOrder.includes(model)) {
+          modelOrder.push(model);
+        }
+        return {
+          content: "Thought: done\nAction: finish\nAction Input: hello",
+          model,
+          usage: { promptTokens: 100, completionTokens: 50 },
+        };
+      },
+    });
+
+    await runMain({
+      argv: ["--models", "expensive/model,cheap/model", "--runs", "1", "--cap-usd", "10000"],
+      env: { OPENROUTER_API_KEY: "test-key" },
+      getGitStatus: () => ({ sha: "abc123def456789012345678901234567890abcd", isDirty: false }),
+      creditFetcher: async () => ({ limitRemaining: null, availableCredits: 10000, keyError: false, creditsError: false }),
+      llmClientFactory: trackingFactory,
+      skipFileWrites: true,
+      skipPricesFetch: true,
+      priceData: testPriceData,
+    });
+
+    expect(modelOrder[0]).toBe("cheap/model");
+    expect(modelOrder[1]).toBe("expensive/model");
+  });
+
+  it("skips expensive model with ZERO calls when credit is short", async () => {
+    const { factory, getCallsPerModel } = createTrackingFactory();
+
+    const { skippedModels, topUpNeeded } = await runMatrix(
+      { suite: "0.1.0", models: ["expensive/model", "cheap/model"], runs: 1, capUsd: 10000, fixture: false },
+      testPriceData,
+      {
+        llmClientFactory: factory,
+        skipFileWrites: true,
+        creditProvider: async () => 1,
+      },
+    );
+
+    const calls = getCallsPerModel();
+    expect(calls.get("expensive/model") ?? 0).toBe(0);
+    expect(skippedModels.length).toBeGreaterThanOrEqual(1);
+    const expensiveSkipped = skippedModels.find((s) => s.model === "expensive/model");
+    expect(expensiveSkipped).toBeDefined();
+    expect(expensiveSkipped!.shortfall).toBeGreaterThan(0);
+    expect(topUpNeeded).toBeGreaterThan(0);
+  });
+
+  it("enough credit runs every model", async () => {
+    const { factory, getCallsPerModel } = createTrackingFactory();
+
+    const { skippedModels } = await runMatrix(
+      { suite: "0.1.0", models: ["expensive/model", "cheap/model"], runs: 1, capUsd: 10000, fixture: false },
+      testPriceData,
+      {
+        llmClientFactory: factory,
+        skipFileWrites: true,
+        creditProvider: async () => 10000,
+      },
+    );
+
+    const calls = getCallsPerModel();
+    expect(calls.get("cheap/model")).toBeGreaterThan(0);
+    expect(calls.get("expensive/model")).toBeGreaterThan(0);
+    expect(skippedModels.length).toBe(0);
+  });
+
+  it("reports exact shortfall and total top-up for skipped models", async () => {
+    const { factory } = createTrackingFactory();
+
+    const { skippedModels, topUpNeeded } = await runMatrix(
+      { suite: "0.1.0", models: ["expensive/model", "cheap/model"], runs: 1, capUsd: 10000, fixture: false },
+      testPriceData,
+      {
+        llmClientFactory: factory,
+        skipFileWrites: true,
+        creditProvider: async () => 0.001,
+      },
+    );
+
+    expect(skippedModels.length).toBeGreaterThanOrEqual(1);
+    for (const skipped of skippedModels) {
+      expect(skipped.shortfall).toBeCloseTo(skipped.worstCase - skipped.remaining, 4);
+    }
+    const sumShortfalls = skippedModels.reduce((sum, s) => sum + s.shortfall, 0);
+    expect(topUpNeeded).toBeCloseTo(Math.max(0, sumShortfalls), 4);
+  });
+
+  it("both endpoints down refuses with non-zero exit and zero LLM calls", async () => {
+    let llmCallCount = 0;
+    const trackingFactory: LlmClientFactory = () => ({
+      async complete(): Promise<LlmCompletionResponse> {
+        llmCallCount++;
+        return { content: "test", model: "test", usage: { promptTokens: 10, completionTokens: 5 } };
+      },
+    });
+
+    const exitCode = await runMain({
+      argv: ["--models", "cheap/model", "--runs", "1"],
+      env: { OPENROUTER_API_KEY: "test-key" },
+      getGitStatus: () => ({ sha: "abc123def456789012345678901234567890abcd", isDirty: false }),
+      creditFetcher: async () => ({ limitRemaining: null, availableCredits: null, keyError: true, creditsError: true }),
+      llmClientFactory: trackingFactory,
+      skipFileWrites: true,
+      skipPricesFetch: true,
+      priceData: testPriceData,
+    });
+
+    expect(exitCode).toBe(1);
+    expect(llmCallCount).toBe(0);
+  });
+
+  it("both endpoints down with --credit-usd uses the flag", async () => {
+    let llmCallCount = 0;
+    const trackingFactory: LlmClientFactory = () => ({
+      async complete(): Promise<LlmCompletionResponse> {
+        llmCallCount++;
+        return {
+          content: "Thought: done\nAction: finish\nAction Input: hello",
+          model: "test",
+          usage: { promptTokens: 10, completionTokens: 5 },
+        };
+      },
+    });
+
+    const exitCode = await runMain({
+      argv: ["--models", "cheap/model", "--runs", "1", "--cap-usd", "1000", "--credit-usd", "1000"],
+      env: { OPENROUTER_API_KEY: "test-key" },
+      getGitStatus: () => ({ sha: "abc123def456789012345678901234567890abcd", isDirty: false }),
+      creditFetcher: async () => ({ limitRemaining: null, availableCredits: null, keyError: true, creditsError: true }),
+      llmClientFactory: trackingFactory,
+      skipFileWrites: true,
+      skipPricesFetch: true,
+      priceData: testPriceData,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(llmCallCount).toBeGreaterThan(0);
+  });
+
+  it("one endpoint down still works from the other (key endpoint down)", async () => {
+    let llmCallCount = 0;
+    const trackingFactory: LlmClientFactory = () => ({
+      async complete(): Promise<LlmCompletionResponse> {
+        llmCallCount++;
+        return {
+          content: "Thought: done\nAction: finish\nAction Input: hello",
+          model: "test",
+          usage: { promptTokens: 10, completionTokens: 5 },
+        };
+      },
+    });
+
+    const exitCode = await runMain({
+      argv: ["--models", "cheap/model", "--runs", "1", "--cap-usd", "1000"],
+      env: { OPENROUTER_API_KEY: "test-key" },
+      getGitStatus: () => ({ sha: "abc123def456789012345678901234567890abcd", isDirty: false }),
+      creditFetcher: async () => ({ limitRemaining: null, availableCredits: 1000, keyError: true, creditsError: false }),
+      llmClientFactory: trackingFactory,
+      skipFileWrites: true,
+      skipPricesFetch: true,
+      priceData: testPriceData,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(llmCallCount).toBeGreaterThan(0);
+  });
+
+  it("one endpoint down still works from the other (credits endpoint down)", async () => {
+    let llmCallCount = 0;
+    const trackingFactory: LlmClientFactory = () => ({
+      async complete(): Promise<LlmCompletionResponse> {
+        llmCallCount++;
+        return {
+          content: "Thought: done\nAction: finish\nAction Input: hello",
+          model: "test",
+          usage: { promptTokens: 10, completionTokens: 5 },
+        };
+      },
+    });
+
+    const exitCode = await runMain({
+      argv: ["--models", "cheap/model", "--runs", "1", "--cap-usd", "1000"],
+      env: { OPENROUTER_API_KEY: "test-key" },
+      getGitStatus: () => ({ sha: "abc123def456789012345678901234567890abcd", isDirty: false }),
+      creditFetcher: async () => ({ limitRemaining: 1000, availableCredits: null, keyError: false, creditsError: true }),
+      llmClientFactory: trackingFactory,
+      skipFileWrites: true,
+      skipPricesFetch: true,
+      priceData: testPriceData,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(llmCallCount).toBeGreaterThan(0);
+  });
+
+  it("null limit_remaining is ignored (uses available credits only)", async () => {
+    let llmCallCount = 0;
+    const trackingFactory: LlmClientFactory = () => ({
+      async complete(): Promise<LlmCompletionResponse> {
+        llmCallCount++;
+        return {
+          content: "Thought: done\nAction: finish\nAction Input: hello",
+          model: "test",
+          usage: { promptTokens: 10, completionTokens: 5 },
+        };
+      },
+    });
+
+    const exitCode = await runMain({
+      argv: ["--models", "cheap/model", "--runs", "1", "--cap-usd", "1000"],
+      env: { OPENROUTER_API_KEY: "test-key" },
+      getGitStatus: () => ({ sha: "abc123def456789012345678901234567890abcd", isDirty: false }),
+      creditFetcher: async () => ({ limitRemaining: null, availableCredits: 1000, keyError: false, creditsError: false }),
+      llmClientFactory: trackingFactory,
+      skipFileWrites: true,
+      skipPricesFetch: true,
+      priceData: testPriceData,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(llmCallCount).toBeGreaterThan(0);
+  });
+
+  it("min with remaining cap is respected", async () => {
+    const { factory } = createTrackingFactory();
+
+    const { skippedModels } = await runMatrix(
+      { suite: "0.1.0", models: ["expensive/model"], runs: 1, capUsd: 0.001, fixture: false },
+      testPriceData,
+      {
+        llmClientFactory: factory,
+        skipFileWrites: true,
+        creditProvider: async () => 1000,
+      },
+    );
+
+    expect(skippedModels.length).toBe(1);
+    expect(skippedModels[0].remaining).toBeLessThanOrEqual(0.001);
+  });
+
+  describe("--credit-usd validation", () => {
+    it("rejects NaN for --credit-usd", () => {
+      const args = parseArgs(["--credit-usd", "abc"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("--credit-usd");
+      expect(args.errors[0]).toContain("finite number");
+    });
+
+    it("rejects missing value for --credit-usd", () => {
+      const args = parseArgs(["--credit-usd"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("--credit-usd requires a value");
+    });
+
+    it("rejects zero for --credit-usd", () => {
+      const args = parseArgs(["--credit-usd", "0"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("--credit-usd");
+      expect(args.errors[0]).toContain("greater than 0");
+    });
+
+    it("rejects negative for --credit-usd", () => {
+      const args = parseArgs(["--credit-usd", "-5"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("--credit-usd requires a value");
+    });
+
+    it("accepts valid positive credit-usd", () => {
+      const args = parseArgs(["--credit-usd", "10"]);
+      expect(args.errors).toEqual([]);
+      expect(args.creditUsd).toBe(10);
+    });
+  });
+});
+
+describe("8. Credit redaction", () => {
+  const FAKE_KEY = "sk-or-test-SECRET123";
+
+  beforeEach(() => {
+    clearSensitiveValues();
+    registerSensitiveValue(FAKE_KEY);
+  });
+
+  afterEach(() => {
+    clearSensitiveValues();
+  });
+
+  it("redacts key from credit-related error messages", () => {
+    const error = new Error(`Credit check failed: Bearer ${FAKE_KEY} rejected`);
+    const redacted = redactError(error);
+
+    expect(redacted.message).not.toContain(FAKE_KEY);
+    expect(redacted.message).not.toContain("SECRET123");
+    expect(redacted.message).toContain("[REDACTED]");
+  });
+
+  it("never logs raw credit endpoint response in mocked scenario", async () => {
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.join(" "));
+
+    try {
+      await runMain({
+        argv: ["--fixture"],
+        env: {},
+        skipFileWrites: true,
+      });
+
+      for (const log of logs) {
+        expect(log).not.toMatch(/total_credits|total_usage|limit_remaining/i);
+      }
+    } finally {
+      console.log = originalLog;
+    }
+  });
+});

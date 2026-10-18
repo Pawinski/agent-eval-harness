@@ -15,7 +15,15 @@ export type AbortReason =
   | "completion_tokens_exceeded"
   | "prompt_tokens_exceeded"
   | "http_errors"
-  | "global_cap";
+  | "global_cap"
+  | "skipped_credit";
+
+export interface SkippedModel {
+  model: string;
+  worstCase: number;
+  remaining: number;
+  shortfall: number;
+}
 
 export class MatrixAbort extends Error {
   readonly reason: AbortReason;

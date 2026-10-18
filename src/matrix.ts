@@ -13,7 +13,7 @@ import {
   fetchModelPrices,
   validatePricesForModels,
   createFixturePrices,
-  sortModelsByCost,
+  sortModelsByFullWorstCase,
   runMatrix,
   getGitSha7,
   getTodayDate,
@@ -23,6 +23,8 @@ import {
   registerSensitiveValue,
   redactError,
   safeStringify,
+  fetchCreditInfo,
+  getDefaultIMax,
   DEFAULT_MODELS,
   DEFAULT_SUITE,
   DEFAULT_RUNS,
@@ -34,6 +36,8 @@ import {
   type PriceData,
   type GitStatus,
   type LlmClientFactory,
+  type CreditProvider,
+  type SkippedModel,
 } from "./matrix/index.js";
 
 interface CliArgs {
@@ -41,6 +45,7 @@ interface CliArgs {
   models: string[];
   runs: number;
   capUsd?: number;
+  creditUsd?: number;
   fixture: boolean;
   help: boolean;
 }
@@ -111,6 +116,21 @@ export function parseArgs(argv: string[]): ParsedCliArgs {
           args.capUsd = parsed;
         }
       }
+    } else if (a === "--credit-usd") {
+      const val = argv[++i];
+      if (val === undefined || val.startsWith("-")) {
+        args.errors.push("--credit-usd requires a value");
+        i--;
+      } else {
+        const parsed = parseFloat(val);
+        if (!Number.isFinite(parsed)) {
+          args.errors.push(`--credit-usd must be a finite number, got: ${val}`);
+        } else if (parsed <= 0) {
+          args.errors.push(`--credit-usd must be greater than 0, got: ${parsed}`);
+        } else {
+          args.creditUsd = parsed;
+        }
+      }
     }
   }
 
@@ -127,9 +147,10 @@ Usage:
 
 Options:
   --suite, -s     Suite version (default: ${DEFAULT_SUITE})
-  --models, -m    Comma-separated model list (default: cheapest-first from default list)
+  --models, -m    Comma-separated model list (default: sorted by worst-case cost)
   --runs, -r      Runs per model (default: ${DEFAULT_RUNS})
   --cap-usd, -c   Global cost cap in USD (default: $10 for 0.1.0, $35 for 0.2.0)
+  --credit-usd    Override credit check with fixed value (use if endpoints fail)
   --fixture, -f   Use fixture answers (no LLM, $0 cost, no API key required)
   --help, -h      Show help
 
@@ -229,6 +250,8 @@ async function writeSummaryFiles(
   globalAbort: boolean,
   taskCount: number,
   fixture: boolean,
+  skippedModels: SkippedModel[] = [],
+  topUpNeeded: number = 0,
 ): Promise<{ jsonPath: string; mdPath: string }> {
   const sha7 = getGitSha7();
   const date = getTodayDate();
@@ -275,6 +298,13 @@ async function writeSummaryFiles(
       abort_reason: r.abortReason ?? null,
     })),
     modelSummaries,
+    skippedModels: skippedModels.map((s) => ({
+      model: s.model,
+      worst_case: s.worstCase,
+      remaining: s.remaining,
+      shortfall: s.shortfall,
+    })),
+    topUpNeeded,
   };
 
   await writeFile(jsonPath, safeStringify(summaryJson, 2), "utf8");
@@ -302,9 +332,26 @@ async function writeSummaryFiles(
     mdLines.push(`| ${model} | ${passStr} | ${s.mean.toFixed(2)} | ${s.spread} | $${s.totalCost.toFixed(6)} |`);
   }
 
+  if (skippedModels.length > 0) {
+    mdLines.push("");
+    mdLines.push("## Skipped Models (insufficient credit)");
+    mdLines.push("");
+    mdLines.push("| Model | Worst Case | Remaining | Shortfall |");
+    mdLines.push("|-------|------------|-----------|-----------|");
+    for (const s of skippedModels) {
+      mdLines.push(`| ${s.model} | $${s.worstCase.toFixed(4)} | $${s.remaining.toFixed(4)} | $${s.shortfall.toFixed(4)} |`);
+    }
+    mdLines.push("");
+    mdLines.push(`**Top-up needed**: $${topUpNeeded.toFixed(2)}`);
+  }
+
   await writeFile(mdPath, mdLines.join("\n") + "\n", "utf8");
 
   return { jsonPath, mdPath };
+}
+
+export interface CreditFetcher {
+  (apiKey: string): Promise<{ limitRemaining: number | null; availableCredits: number | null; keyError: boolean; creditsError: boolean }>;
 }
 
 export interface RunMainDeps {
@@ -312,6 +359,7 @@ export interface RunMainDeps {
   env?: Record<string, string | undefined>;
   getGitStatus?: () => GitStatus;
   llmClientFactory?: LlmClientFactory;
+  creditFetcher?: CreditFetcher;
   skipFileWrites?: boolean;
   skipPricesFetch?: boolean;
   priceData?: PriceData;
@@ -408,8 +456,63 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
     console.log(`Prices fetched at: ${priceData.fetchedAt}`);
   }
 
-  const sortedModels = sortModelsByCost(args.models, priceData);
-  console.log(`Running models (cheapest first): ${sortedModels.join(", ")}`);
+  const suiteConfig = SUITE_CONFIGS[args.suite] ?? { maxSteps: 8 };
+  const maxSteps = suiteConfig.maxSteps;
+  const iMax = getDefaultIMax(args.suite, maxSteps);
+
+  const sortedModels = sortModelsByFullWorstCase(
+    args.models,
+    priceData,
+    args.runs,
+    tasks.length,
+    maxSteps,
+    iMax,
+  );
+  console.log(`Running models (ascending worst-case): ${sortedModels.join(", ")}`);
+
+  let creditProvider: CreditProvider | undefined;
+  let initialCredit: number | null = null;
+
+  if (!args.fixture) {
+    const creditFetcher = deps.creditFetcher ?? fetchCreditInfo;
+
+    if (args.creditUsd !== undefined) {
+      initialCredit = args.creditUsd;
+      console.log(`Credit (from --credit-usd): $${initialCredit.toFixed(2)}`);
+    } else {
+      console.log("Checking credit...");
+      const creditResult = await creditFetcher(apiKey!);
+
+      if (creditResult.keyError && creditResult.creditsError) {
+        console.error("Error: Both credit endpoints failed.");
+        console.error("Use --credit-usd to override.");
+        return 1;
+      }
+
+      const values: number[] = [];
+      if (creditResult.limitRemaining !== null) {
+        values.push(creditResult.limitRemaining);
+        console.log(`  Limit remaining: $${creditResult.limitRemaining.toFixed(2)}`);
+      } else {
+        console.log(`  Limit remaining: unlimited`);
+      }
+      if (creditResult.availableCredits !== null) {
+        values.push(creditResult.availableCredits);
+        console.log(`  Available credits: $${creditResult.availableCredits.toFixed(2)}`);
+      }
+
+      if (values.length > 0) {
+        initialCredit = Math.min(...values);
+        console.log(`  Effective credit: $${initialCredit.toFixed(2)}`);
+      }
+    }
+
+    if (initialCredit !== null) {
+      const effectiveCredit = initialCredit;
+      creditProvider = async () => effectiveCredit;
+    }
+  }
+
   console.log("---");
 
   const config = {
@@ -420,7 +523,7 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
     fixture: args.fixture,
   };
 
-  const { runs, globalAbort } = await runMatrix(config, priceData, {
+  const { runs, globalAbort, skippedModels, topUpNeeded } = await runMatrix(config, priceData, {
     callbacks: {
       onRunStart: (model, runN) => {
         console.log(`Starting: ${model} run ${runN}`);
@@ -441,22 +544,35 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
       onModelAbort: (model, reason) => {
         console.log(`Model aborted: ${model} - ${reason}`);
       },
+      onModelSkipped: (model, worstCase, remaining, shortfall) => {
+        console.log(`Skipped: ${model} (worst case $${worstCase.toFixed(4)} > remaining $${remaining.toFixed(4)}, shortfall $${shortfall.toFixed(4)})`);
+      },
       onGlobalAbort: () => {
         console.log("GLOBAL CAP REACHED - halting matrix");
       },
     },
     llmClientFactory: deps.llmClientFactory,
     skipFileWrites: deps.skipFileWrites,
+    creditProvider,
   });
 
   if (globalAbort) {
     console.log("\n*** Matrix halted due to global cost cap ***");
   }
 
+  if (skippedModels.length > 0) {
+    console.log("\n--- Skipped Models (insufficient credit) ---");
+    for (const skipped of skippedModels) {
+      console.log(`  ${skipped.model}: worst case $${skipped.worstCase.toFixed(4)}, remaining $${skipped.remaining.toFixed(4)}, shortfall $${skipped.shortfall.toFixed(4)}`);
+    }
+    // Top-up formula: sum of shortfalls, floored at 0
+    console.log(`\nTop-up needed: $${topUpNeeded.toFixed(2)}`);
+  }
+
   printSummaryToConsole(runs, args.suite, capUsd, tasks.length);
 
   if (!deps.skipFileWrites) {
-    const { jsonPath, mdPath } = await writeSummaryFiles(runs, args.suite, priceData, capUsd, globalAbort, tasks.length, args.fixture);
+    const { jsonPath, mdPath } = await writeSummaryFiles(runs, args.suite, priceData, capUsd, globalAbort, tasks.length, args.fixture, skippedModels, topUpNeeded);
 
     console.log("\n--- Output Files ---");
     console.log(`Summary JSON: ${jsonPath}`);
