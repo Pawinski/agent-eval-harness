@@ -2,12 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import {
-  runScan,
-  formatOutput,
-  scanFile,
-  BANNED_TERMS,
-} from "./ban-scan.js";
+import { runScan, formatOutput, scanFile } from "./ban-scan.js";
+
+const SYNTHETIC_TERMS = ["zzfaketermzz", "xxsyntheticxx"];
 
 describe("ban-scan", () => {
   let tempDir: string;
@@ -20,12 +17,11 @@ describe("ban-scan", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("detects a forbidden term and returns correct hit count and path:line", () => {
-    const forbiddenTerm = ["R", "eid"].join("");
+  it("detects a synthetic term and returns correct hit count and path:line", () => {
     const testFile = path.join(tempDir, "test-file.ts");
-    writeFileSync(testFile, `const name = "${forbiddenTerm}";\n`);
+    writeFileSync(testFile, `const name = "zzfaketermzz";\n`);
 
-    const result = runScan(tempDir, BANNED_TERMS);
+    const result = runScan(tempDir, SYNTHETIC_TERMS);
 
     expect(result.total).toBe(1);
     expect(result.hits).toHaveLength(1);
@@ -33,15 +29,14 @@ describe("ban-scan", () => {
     expect(result.hits[0].line).toBe(1);
   });
 
-  it("output contains no forbidden terms", () => {
-    const forbiddenTerm = ["car", "eer"].join("");
+  it("output contains no scanned terms", () => {
     const testFile = path.join(tempDir, "leaked.ts");
-    writeFileSync(testFile, `const job = "${forbiddenTerm}";\n`);
+    writeFileSync(testFile, `const job = "xxsyntheticxx";\n`);
 
-    const result = runScan(tempDir, BANNED_TERMS);
+    const result = runScan(tempDir, SYNTHETIC_TERMS);
     const output = formatOutput(result);
 
-    for (const term of BANNED_TERMS) {
+    for (const term of SYNTHETIC_TERMS) {
       expect(output.toLowerCase()).not.toContain(term.toLowerCase());
     }
 
@@ -53,34 +48,32 @@ describe("ban-scan", () => {
     const cleanFile = path.join(tempDir, "clean.ts");
     writeFileSync(cleanFile, "const x = 42;\n");
 
-    const result = runScan(tempDir, BANNED_TERMS);
+    const result = runScan(tempDir, SYNTHETIC_TERMS);
     const output = formatOutput(result);
 
     expect(result.total).toBe(0);
     expect(output).toContain("PASS: 0 hits");
   });
 
-  it("scanFile returns line numbers without exposing terms", () => {
-    const forbiddenTerm = ["Sal", "on"].join("");
+  it("scanFile returns line numbers only", () => {
     const testFile = path.join(tempDir, "file.ts");
     writeFileSync(
       testFile,
-      `line one\ncontains ${forbiddenTerm} here\nline three\n`
+      `line one\ncontains zzfaketermzz here\nline three\n`
     );
 
-    const violations = scanFile(testFile, BANNED_TERMS);
+    const violations = scanFile(testFile, SYNTHETIC_TERMS);
 
     expect(violations).toHaveLength(1);
     expect(violations[0].line).toBe(2);
     expect(Object.keys(violations[0])).toEqual(["line"]);
   });
 
-  it("output format shows only path:line, no term or line content", () => {
-    const forbiddenTerm = ["Stay", "22"].join("");
+  it("output format shows only path:line, no content", () => {
     const testFile = path.join(tempDir, "app.ts");
-    writeFileSync(testFile, `secret: "${forbiddenTerm}"\n`);
+    writeFileSync(testFile, `secret: "zzfaketermzz"\n`);
 
-    const result = runScan(tempDir, BANNED_TERMS);
+    const result = runScan(tempDir, SYNTHETIC_TERMS);
     const output = formatOutput(result);
 
     expect(output).toContain("app.ts:1");
