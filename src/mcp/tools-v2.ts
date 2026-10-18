@@ -287,8 +287,8 @@ export function checkPermissionModelSupport(): { ok: boolean; message?: string }
   const nodeVersion = process.versions.node;
   const [major] = nodeVersion.split(".").map(Number);
   
-  if (major < 20) {
-    return { ok: false, message: `Node ${nodeVersion} is too old; permission model requires Node >= 20` };
+  if (major < 22) {
+    return { ok: false, message: `Node ${nodeVersion} is too old; permission model requires Node >= 22` };
   }
 
   const result = spawnSync(process.execPath, ["--permission", "-e", "console.log('ok')"], {

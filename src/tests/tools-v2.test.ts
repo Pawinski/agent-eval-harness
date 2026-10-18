@@ -1110,7 +1110,7 @@ describe("preflight check", () => {
     const nodeVersion = process.versions.node;
     const [major] = nodeVersion.split(".").map(Number);
     
-    if (major < 20) {
+    if (major < 22) {
       const result = checkPermissionModelSupport();
       expect(result.ok).toBe(false);
       expect(result.message).toContain("too old");

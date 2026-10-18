@@ -14,7 +14,7 @@
     "ban-scan": "node --import tsx src/tests/ban-scan.ts"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "keywords": [
     "eval",
