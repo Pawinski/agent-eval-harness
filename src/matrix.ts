@@ -11,6 +11,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { PROJECT_NAME } from "./name.js";
 import { runPreflight } from "./mcp/index.js";
 import {
   fetchModelPrices,
@@ -136,7 +137,7 @@ export function parseArgs(argv: string[]): ParsedCliArgs {
 }
 
 function printHelp(): void {
-  console.log(`basilisk-eval matrix runner
+  console.log(`${PROJECT_NAME} matrix runner
 
 Usage:
   OPENROUTER_API_KEY=... npm run matrix
@@ -436,7 +437,7 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
 
   const capUsd = args.capUsd ?? getDefaultCapUsd(args.suite);
 
-  console.log(`basilisk-eval matrix runner`);
+  console.log(`${PROJECT_NAME} matrix runner`);
   console.log(`Suite: ${args.suite}`);
   console.log(`Models: ${args.models.join(", ")}`);
   console.log(`Runs: ${args.runs}`);

@@ -4,6 +4,9 @@
  * Stub-friendly: dry-run mode when no key is set.
  */
 
+import { getCacheBreakpointEnabled } from "../cache-breakpoint.js";
+import { PROJECT_NAME } from "../name.js";
+
 export type ChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
@@ -66,7 +69,7 @@ export class OpenRouterClient implements LlmClient {
       opts.maxTokens ?? (envMaxTokens ? parseInt(envMaxTokens, 10) : DEFAULT_MAX_TOKENS);
 
     this.cacheBreakpoint =
-      opts.cacheBreakpoint ?? process.env.BASILISK_CACHE_BREAKPOINT === "1";
+      opts.cacheBreakpoint ?? getCacheBreakpointEnabled().enabled;
   }
 
   get modelId(): string {
@@ -135,7 +138,7 @@ export class OpenRouterClient implements LlmClient {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",
         "HTTP-Referer": "https://github.com/Pawinski/basilisk-eval",
-        "X-Title": "basilisk-eval",
+        "X-Title": PROJECT_NAME,
       },
       body: JSON.stringify(body),
     });

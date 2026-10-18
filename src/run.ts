@@ -12,6 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReactAgent } from "./agent/react.js";
 import { createLlmClient, OpenRouterClient } from "./llm/index.js";
+import { PROJECT_NAME } from "./name.js";
 import {
   createDefaultMcpClient,
   InProcessMcpClient,
@@ -147,7 +148,7 @@ async function runOneTask(
 }
 
 function printHelp(): void {
-  console.log(`eval harness — suite ${SUITE_VERSION}
+  console.log(`${PROJECT_NAME} — suite ${SUITE_VERSION}
 
 Usage:
   npm run eval -- [--fixture] [--task <id>] [--suite <version>]
@@ -239,7 +240,7 @@ async function main(): Promise<void> {
     maxObservationChars = 4096;
   }
 
-  console.log(`eval harness suite ${suiteVersion}`);
+  console.log(`${PROJECT_NAME} suite ${suiteVersion}`);
   console.log(`versionSource=${getSuiteVersionPath()}`);
   console.log(`mode=${mode} tasks=${tasks.length}`);
   console.log("---");
