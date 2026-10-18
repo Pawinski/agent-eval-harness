@@ -1,5 +1,6 @@
 export {
   createDefaultMcpClient,
+  getDefaultToolDefinitions,
   InProcessMcpClient,
   type InProcessMcpOptions,
   type McpToolCall,

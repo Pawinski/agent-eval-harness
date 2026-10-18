@@ -1,14 +1,18 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   createToolsV2Context,
+  createToolsV2Options,
   createReadFileTool,
   createApplyPatchTool,
   createRunCheckTool,
   createCsvQueryTool,
   createFlakySumTool,
   createFlakyLookupTool,
+  getToolsV2Schemas,
   type ToolsV2Context,
 } from "../mcp/tools-v2.js";
+import { InProcessMcpClient } from "../mcp/client.js";
+import { TASKS_V2 } from "../suite/tasks-v2.js";
 
 describe("read_file tool", () => {
   const tool = createReadFileTool();
@@ -359,5 +363,133 @@ describe("observation truncation", () => {
     const truncated = longContent.slice(0, maxChars) + "\n[truncated]";
     expect(truncated.length).toBeLessThan(longContent.length);
     expect(truncated).toContain("[truncated]");
+  });
+});
+
+describe("0.2.0 tool catalog completeness", () => {
+  it("has exactly 11 tools (5 v1 + 6 v2)", () => {
+    const schemas = getToolsV2Schemas();
+    expect(schemas.length).toBe(11);
+  });
+
+  it("includes all v1 tools", () => {
+    const schemas = getToolsV2Schemas();
+    const names = schemas.map((s) => s.name);
+    expect(names).toContain("echo");
+    expect(names).toContain("add");
+    expect(names).toContain("json_get");
+    expect(names).toContain("regex_extract");
+    expect(names).toContain("word_count");
+  });
+
+  it("includes all v2 tools", () => {
+    const schemas = getToolsV2Schemas();
+    const names = schemas.map((s) => s.name);
+    expect(names).toContain("read_file");
+    expect(names).toContain("apply_patch");
+    expect(names).toContain("run_check");
+    expect(names).toContain("csv_query");
+    expect(names).toContain("flaky_sum");
+    expect(names).toContain("flaky_lookup");
+  });
+
+  it("every 0.2.0 task's expected tools exist in catalog", () => {
+    const schemas = getToolsV2Schemas();
+    const availableTools = new Set(schemas.map((s) => s.name));
+
+    for (const task of TASKS_V2) {
+      if (task.expectedTools) {
+        for (const toolName of task.expectedTools) {
+          expect(availableTools.has(toolName)).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("createToolsV2Options returns client with 11 tools", async () => {
+    const ctx = createToolsV2Context();
+    const options = createToolsV2Options(ctx);
+    const client = new InProcessMcpClient(options);
+    const tools = await client.listTools();
+    expect(tools.length).toBe(11);
+  });
+});
+
+describe("tool state isolation per task", () => {
+  describe("error recovery gets injected error on each fresh context", () => {
+    it("flaky_sum fails on first call in both runs", async () => {
+      const ctx1 = createToolsV2Context();
+      const tool1 = createFlakySumTool(ctx1);
+      const result1 = await tool1.handler({ a: 10, b: 20 });
+      expect(result1.ok).toBe(false);
+
+      const ctx2 = createToolsV2Context();
+      const tool2 = createFlakySumTool(ctx2);
+      const result2 = await tool2.handler({ a: 10, b: 20 });
+      expect(result2.ok).toBe(false);
+    });
+
+    it("flaky_lookup fails on first call in both runs", async () => {
+      const ctx1 = createToolsV2Context();
+      const tool1 = createFlakyLookupTool(ctx1);
+      const result1 = await tool1.handler({ sku: "SKU-100" });
+      expect(result1.ok).toBe(false);
+
+      const ctx2 = createToolsV2Context();
+      const tool2 = createFlakyLookupTool(ctx2);
+      const result2 = await tool2.handler({ sku: "SKU-100" });
+      expect(result2.ok).toBe(false);
+    });
+  });
+
+  describe("patch state does not leak between task runs", () => {
+    it("apply_patch in one context does not affect another context", async () => {
+      const ctx1 = createToolsV2Context();
+      const patchTool1 = createApplyPatchTool(ctx1);
+
+      await patchTool1.handler({
+        path: "code/buggy.ts",
+        old_line: "for (let i = 0; i <= arr.length; i++) {",
+        new_line: "for (let i = 0; i < arr.length; i++) {",
+      });
+
+      expect(ctx1.patchState.patched.has("code/buggy.ts")).toBe(true);
+
+      const ctx2 = createToolsV2Context();
+      expect(ctx2.patchState.patched.has("code/buggy.ts")).toBe(false);
+
+      const checkTool2 = createRunCheckTool(ctx2);
+      const result = await checkTool2.handler({
+        path: "code/buggy.ts",
+        check: "sum_array",
+      });
+      expect(result.content).toBe("exit 1");
+    });
+
+    it("patched file in context 1 reads original in context 2", async () => {
+      const ctx1 = createToolsV2Context();
+      const patchTool1 = createApplyPatchTool(ctx1);
+
+      await patchTool1.handler({
+        path: "code/buggy.ts",
+        old_line: "for (let i = 0; i <= arr.length; i++) {",
+        new_line: "for (let i = 0; i < arr.length; i++) {",
+      });
+
+      const checkTool1 = createRunCheckTool(ctx1);
+      const result1 = await checkTool1.handler({
+        path: "code/buggy.ts",
+        check: "sum_array",
+      });
+      expect(result1.content).toBe("exit 0");
+
+      const ctx2 = createToolsV2Context();
+      const checkTool2 = createRunCheckTool(ctx2);
+      const result2 = await checkTool2.handler({
+        path: "code/buggy.ts",
+        check: "sum_array",
+      });
+      expect(result2.content).toBe("exit 1");
+    });
   });
 });

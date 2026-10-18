@@ -1,11 +1,13 @@
 /**
  * Suite 0.2.0 tools: fixture-backed, no network, no shell, no writes outside memory.
+ * Includes all v1 tools (echo, add, json_get, regex_extract, word_count) plus v2 tools.
  */
 
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { McpToolResult, McpToolSchema, InProcessMcpOptions } from "./client.js";
+import { getDefaultToolDefinitions } from "./client.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_ROOT = path.resolve(__dirname, "../../fixtures");
@@ -430,8 +432,10 @@ export function createFlakyLookupTool(ctx: ToolsV2Context): McpToolSchema & { ha
   };
 }
 
+/** Returns schemas for all 11 tools available in suite 0.2.0 (5 v1 + 6 v2). */
 export function getToolsV2Schemas(): McpToolSchema[] {
-  return [
+  const v1Schemas = getDefaultToolDefinitions().map(({ handler: _h, ...schema }) => schema);
+  const v2Schemas: McpToolSchema[] = [
     { name: "read_file", description: "Read a fixture file by relative path (e.g. code/calculator.ts). Returns file contents.", inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { name: "apply_patch", description: "Apply a unified diff patch to a fixture file in memory. Use old_line and new_line for single-line replacement.", inputSchema: { type: "object", properties: { path: { type: "string" }, old_line: { type: "string" }, new_line: { type: "string" } }, required: ["path", "old_line", "new_line"] } },
     { name: "run_check", description: "Run a fixture check on a patched file. Returns exit code 0 on success, 1 on failure.", inputSchema: { type: "object", properties: { path: { type: "string" }, check: { type: "string" } }, required: ["path", "check"] } },
@@ -439,17 +443,21 @@ export function getToolsV2Schemas(): McpToolSchema[] {
     { name: "flaky_sum", description: "Sum two numbers. May fail on first attempt - retry on error.", inputSchema: { type: "object", properties: { a: { type: "number" }, b: { type: "number" } }, required: ["a", "b"] } },
     { name: "flaky_lookup", description: "Look up a product name by SKU. May fail on first attempt - retry on error.", inputSchema: { type: "object", properties: { sku: { type: "string" } }, required: ["sku"] } },
   ];
+  return [...v1Schemas, ...v2Schemas];
 }
 
+/** Creates tool options with all 11 tools (5 v1 + 6 v2) for suite 0.2.0. */
 export function createToolsV2Options(ctx: ToolsV2Context): InProcessMcpOptions {
+  const v1Tools = getDefaultToolDefinitions();
+  const v2Tools = [
+    createReadFileTool(),
+    createApplyPatchTool(ctx),
+    createRunCheckTool(ctx),
+    createCsvQueryTool(),
+    createFlakySumTool(ctx),
+    createFlakyLookupTool(ctx),
+  ];
   return {
-    tools: [
-      createReadFileTool(),
-      createApplyPatchTool(ctx),
-      createRunCheckTool(ctx),
-      createCsvQueryTool(),
-      createFlakySumTool(ctx),
-      createFlakyLookupTool(ctx),
-    ],
+    tools: [...v1Tools, ...v2Tools],
   };
 }
