@@ -15,3 +15,7 @@ Each JSON file in `results/<suite>/` contains one eval run result with these fie
 - `date`: string; the run date in YYYY-MM-DD format.
 
 Baseline row `0.1.0/4100fbb-nex-agi__nex-n2.5-pro-run1.json`: `cost_usd` computed at the 2026-10-17 OpenRouter list price ($0.075 per M input, $0.25 per M output): 4,721 × 0.075e-6 + 1,102 × 0.25e-6 = $0.00063. Not billed. Source: live run log 2026-10-04T18:37:51Z at 4100fbb.
+
+## Suite 0.1.0 Reproducibility
+
+Suite 0.1.0 result rows compare only with other 0.1.0 rows; cross-suite comparisons are not valid. To reproduce 0.1.0 results, check out commit e61f639, which all 0.1.0 result rows cite.
