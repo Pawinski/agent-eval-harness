@@ -1,0 +1,637 @@
+{
+  "sha": "6d216f5e0c9f44d0be5d248f539adc1e638813ed",
+  "suite": "0.2.0",
+  "model": "mistralai/mistral-large-2512",
+  "run_n": 1,
+  "pricesFetchedAt": "2026-10-18T09:46:22.465Z",
+  "pricing": {
+    "promptPrice": 5e-7,
+    "completionPrice": 0.0000015
+  },
+  "emptyTasks": [
+    "chain_word_count_multiply"
+  ],
+  "emptyCount": 1,
+  "calls": [
+    {
+      "taskId": "chain_json_regex_add",
+      "step": 1,
+      "usage": {
+        "promptTokens": 518,
+        "completionTokens": 346,
+        "cachedTokens": 0,
+        "costUsd": 0.000778
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "chain_json_regex_add",
+      "step": 2,
+      "usage": {
+        "promptTokens": 881,
+        "completionTokens": 41,
+        "cachedTokens": 512,
+        "costUsd": 0.000502
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "chain_word_count_multiply",
+      "step": 1,
+      "usage": {
+        "promptTokens": 476,
+        "completionTokens": 212,
+        "cachedTokens": 384,
+        "costUsd": 0.0005560000000000001
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "chain_word_count_multiply",
+      "step": 2,
+      "usage": {
+        "promptTokens": 695,
+        "completionTokens": 355,
+        "cachedTokens": 384,
+        "costUsd": 0.0008799999999999999
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "chain_word_count_multiply",
+      "step": 3,
+      "usage": {
+        "promptTokens": 1057,
+        "completionTokens": 145,
+        "cachedTokens": 640,
+        "costUsd": 0.000746
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "chain_word_count_multiply",
+      "step": 4,
+      "usage": {
+        "promptTokens": 996,
+        "completionTokens": 325,
+        "cachedTokens": 384,
+        "costUsd": 0.0009855
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "chain_word_count_multiply",
+      "step": 5,
+      "usage": {
+        "promptTokens": 966,
+        "completionTokens": 254,
+        "cachedTokens": 384,
+        "costUsd": 0.000864
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "chain_word_count_multiply",
+      "step": 6,
+      "usage": {
+        "promptTokens": 1070,
+        "completionTokens": 201,
+        "cachedTokens": 384,
+        "costUsd": 0.0008365
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "chain_word_count_multiply",
+      "step": 7,
+      "usage": {
+        "promptTokens": 947,
+        "completionTokens": 163,
+        "cachedTokens": 384,
+        "costUsd": 0.0007179999999999999
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "chain_word_count_multiply",
+      "step": 8,
+      "usage": {
+        "promptTokens": 856,
+        "completionTokens": 118,
+        "cachedTokens": 384,
+        "costUsd": 0.000605
+      },
+      "empty": false,
+      "httpError": false,
+      "retries": 1,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "chain_extract_sum",
+      "step": 1,
+      "usage": {
+        "promptTokens": 501,
+        "completionTokens": 230,
+        "cachedTokens": 384,
+        "costUsd": 0.0005954999999999999
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "chain_extract_sum",
+      "step": 2,
+      "usage": {
+        "promptTokens": 739,
+        "completionTokens": 160,
+        "cachedTokens": 384,
+        "costUsd": 0.0006095
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "chain_extract_sum",
+      "step": 3,
+      "usage": {
+        "promptTokens": 907,
+        "completionTokens": 39,
+        "cachedTokens": 640,
+        "costUsd": 0.000512
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "select_echo_tool",
+      "step": 1,
+      "usage": {
+        "promptTokens": 453,
+        "completionTokens": 48,
+        "cachedTokens": 384,
+        "costUsd": 0.0002985
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "select_echo_tool",
+      "step": 2,
+      "usage": {
+        "promptTokens": 508,
+        "completionTokens": 35,
+        "cachedTokens": 384,
+        "costUsd": 0.0003065
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "select_add_tool",
+      "step": 1,
+      "usage": {
+        "promptTokens": 451,
+        "completionTokens": 57,
+        "cachedTokens": 384,
+        "costUsd": 0.00031099999999999997
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "select_add_tool",
+      "step": 2,
+      "usage": {
+        "promptTokens": 517,
+        "completionTokens": 41,
+        "cachedTokens": 384,
+        "costUsd": 0.00031999999999999997
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "select_json_tool",
+      "step": 1,
+      "usage": {
+        "promptTokens": 463,
+        "completionTokens": 51,
+        "cachedTokens": 384,
+        "costUsd": 0.000308
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "select_json_tool",
+      "step": 2,
+      "usage": {
+        "promptTokens": 520,
+        "completionTokens": 25,
+        "cachedTokens": 0,
+        "costUsd": 0.00029749999999999997
+      },
+      "empty": false,
+      "httpError": false,
+      "retries": 3,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "code_compute_result",
+      "step": 1,
+      "usage": {
+        "promptTokens": 207,
+        "completionTokens": 51,
+        "cachedTokens": 128,
+        "costUsd": 0.00017999999999999998
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "code_compute_result",
+      "step": 2,
+      "usage": {
+        "promptTokens": 569,
+        "completionTokens": 71,
+        "cachedTokens": 128,
+        "costUsd": 0.00039099999999999996
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "code_find_throw",
+      "step": 1,
+      "usage": {
+        "promptTokens": 211,
+        "completionTokens": 48,
+        "cachedTokens": 128,
+        "costUsd": 0.00017749999999999998
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "code_find_throw",
+      "step": 2,
+      "usage": {
+        "promptTokens": 570,
+        "completionTokens": 29,
+        "cachedTokens": 128,
+        "costUsd": 0.0003285
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "code_validate_email",
+      "step": 1,
+      "usage": {
+        "promptTokens": 214,
+        "completionTokens": 51,
+        "cachedTokens": 128,
+        "costUsd": 0.00018350000000000002
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "code_validate_email",
+      "step": 2,
+      "usage": {
+        "promptTokens": 811,
+        "completionTokens": 28,
+        "cachedTokens": 128,
+        "costUsd": 0.0004475
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "patch_sum_array",
+      "step": 1,
+      "usage": {
+        "promptTokens": 321,
+        "completionTokens": 48,
+        "cachedTokens": 128,
+        "costUsd": 0.0002325
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "patch_sum_array",
+      "step": 2,
+      "usage": {
+        "promptTokens": 660,
+        "completionTokens": 130,
+        "cachedTokens": 256,
+        "costUsd": 0.000525
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "patch_sum_array",
+      "step": 3,
+      "usage": {
+        "promptTokens": 797,
+        "completionTokens": 54,
+        "cachedTokens": 640,
+        "costUsd": 0.0004795
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "patch_sum_array",
+      "step": 4,
+      "usage": {
+        "promptTokens": 533,
+        "completionTokens": 49,
+        "cachedTokens": 0,
+        "costUsd": 0.00033999999999999997
+      },
+      "empty": false,
+      "httpError": false,
+      "retries": 2,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "patch_find_max",
+      "step": 1,
+      "usage": {
+        "promptTokens": 319,
+        "completionTokens": 45,
+        "cachedTokens": 256,
+        "costUsd": 0.000227
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "patch_find_max",
+      "step": 2,
+      "usage": {
+        "promptTokens": 655,
+        "completionTokens": 93,
+        "cachedTokens": 256,
+        "costUsd": 0.00046699999999999997
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "patch_find_max",
+      "step": 3,
+      "usage": {
+        "promptTokens": 755,
+        "completionTokens": 50,
+        "cachedTokens": 640,
+        "costUsd": 0.0004525
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "patch_find_max",
+      "step": 4,
+      "usage": {
+        "promptTokens": 487,
+        "completionTokens": 31,
+        "cachedTokens": 256,
+        "costUsd": 0.00029
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "patch_greet",
+      "step": 1,
+      "usage": {
+        "promptTokens": 315,
+        "completionTokens": 57,
+        "cachedTokens": 0,
+        "costUsd": 0.000243
+      },
+      "empty": false,
+      "httpError": false,
+      "retries": 2,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "patch_greet",
+      "step": 2,
+      "usage": {
+        "promptTokens": 663,
+        "completionTokens": 100,
+        "cachedTokens": 256,
+        "costUsd": 0.0004815
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "patch_greet",
+      "step": 3,
+      "usage": {
+        "promptTokens": 770,
+        "completionTokens": 56,
+        "cachedTokens": 640,
+        "costUsd": 0.000469
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "patch_greet",
+      "step": 4,
+      "usage": {
+        "promptTokens": 498,
+        "completionTokens": 36,
+        "cachedTokens": 256,
+        "costUsd": 0.000303
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "data_inventory_sum",
+      "step": 1,
+      "usage": {
+        "promptTokens": 233,
+        "completionTokens": 70,
+        "cachedTokens": 128,
+        "costUsd": 0.00022150000000000002
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "data_inventory_sum",
+      "step": 2,
+      "usage": {
+        "promptTokens": 315,
+        "completionTokens": 40,
+        "cachedTokens": 128,
+        "costUsd": 0.00021749999999999997
+      },
+      "empty": false,
+      "httpError": false,
+      "retries": 1,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "data_weather_avg",
+      "step": 1,
+      "usage": {
+        "promptTokens": 241,
+        "completionTokens": 92,
+        "cachedTokens": 128,
+        "costUsd": 0.0002585
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "data_weather_avg",
+      "step": 2,
+      "usage": {
+        "promptTokens": 346,
+        "completionTokens": 50,
+        "cachedTokens": 128,
+        "costUsd": 0.000248
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "error_recovery_sum",
+      "step": 1,
+      "usage": {
+        "promptTokens": 217,
+        "completionTokens": 61,
+        "cachedTokens": 128,
+        "costUsd": 0.00019999999999999998
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "error_recovery_sum",
+      "step": 2,
+      "usage": {
+        "promptTokens": 291,
+        "completionTokens": 41,
+        "cachedTokens": 128,
+        "costUsd": 0.000207
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "error_recovery_sum",
+      "step": 3,
+      "usage": {
+        "promptTokens": 340,
+        "completionTokens": 34,
+        "cachedTokens": 256,
+        "costUsd": 0.00022099999999999998
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "error_recovery_lookup",
+      "step": 1,
+      "usage": {
+        "promptTokens": 222,
+        "completionTokens": 71,
+        "cachedTokens": 128,
+        "costUsd": 0.0002175
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "error_recovery_lookup",
+      "step": 2,
+      "usage": {
+        "promptTokens": 305,
+        "completionTokens": 45,
+        "cachedTokens": 128,
+        "costUsd": 0.00021999999999999998
+      },
+      "empty": false,
+      "httpError": false,
+      "temperatureSent": true
+    },
+    {
+      "taskId": "error_recovery_lookup",
+      "step": 3,
+      "usage": {
+        "promptTokens": 357,
+        "completionTokens": 37,
+        "cachedTokens": 256,
+        "costUsd": 0.000234
+      },
+      "empty": false,
+      "httpError": false,
+      "retries": 1,
+      "temperatureSent": true
+    }
+  ],
+  "retries": 10,
+  "parametersFetched": true,
+  "temperatureSent": true
+}

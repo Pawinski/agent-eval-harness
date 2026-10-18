@@ -1,0 +1,303 @@
+{
+  "suite": "0.2.0",
+  "sha": "6d216f5",
+  "date": "2026-10-18",
+  "capUsd": 35,
+  "globalAbort": false,
+  "pricesFetchedAt": "2026-10-18T09:46:22.465Z",
+  "taskCount": 16,
+  "runs": [
+    {
+      "model": "nex-agi/nex-n2.5-pro",
+      "run_n": 1,
+      "pass": 16,
+      "total": 16,
+      "tokens_in": 39621,
+      "tokens_out": 5423,
+      "tokens_cached": 14848,
+      "cost_usd": 0.004327325,
+      "empty_tasks": [],
+      "abort_reason": null,
+      "temperature_sent": true
+    },
+    {
+      "model": "nex-agi/nex-n2.5-pro",
+      "run_n": 2,
+      "pass": 15,
+      "total": 16,
+      "tokens_in": 39122,
+      "tokens_out": 5934,
+      "tokens_cached": 14592,
+      "cost_usd": 0.00441765,
+      "empty_tasks": [],
+      "abort_reason": null,
+      "temperature_sent": true
+    },
+    {
+      "model": "nex-agi/nex-n2.5-pro",
+      "run_n": 3,
+      "pass": 16,
+      "total": 16,
+      "tokens_in": 34978,
+      "tokens_out": 4933,
+      "tokens_cached": 12416,
+      "cost_usd": 0.0038566,
+      "empty_tasks": [],
+      "abort_reason": null,
+      "temperature_sent": true
+    },
+    {
+      "model": "anthropic/claude-haiku-5.5",
+      "run_n": 1,
+      "pass": 16,
+      "total": 16,
+      "tokens_in": 29702,
+      "tokens_out": 2831,
+      "tokens_cached": 0,
+      "cost_usd": 0.004385699999999999,
+      "empty_tasks": [],
+      "abort_reason": null,
+      "temperature_sent": false
+    },
+    {
+      "model": "anthropic/claude-haiku-5.5",
+      "run_n": 2,
+      "pass": 16,
+      "total": 16,
+      "tokens_in": 30378,
+      "tokens_out": 3295,
+      "tokens_cached": 0,
+      "cost_usd": 0.0046853,
+      "empty_tasks": [],
+      "abort_reason": null,
+      "temperature_sent": false
+    },
+    {
+      "model": "anthropic/claude-haiku-5.5",
+      "run_n": 3,
+      "pass": 14,
+      "total": 16,
+      "tokens_in": 29997,
+      "tokens_out": 4303,
+      "tokens_cached": 0,
+      "cost_usd": 0.0051512,
+      "empty_tasks": [],
+      "abort_reason": null,
+      "temperature_sent": false
+    },
+    {
+      "model": "openai/gpt-4o-mini",
+      "run_n": 1,
+      "pass": 15,
+      "total": 16,
+      "tokens_in": 24293,
+      "tokens_out": 2327,
+      "tokens_cached": 0,
+      "cost_usd": 0.00504015,
+      "empty_tasks": [
+        "chain_word_count_multiply"
+      ],
+      "abort_reason": null,
+      "temperature_sent": true
+    },
+    {
+      "model": "openai/gpt-4o-mini",
+      "run_n": 2,
+      "pass": 15,
+      "total": 16,
+      "tokens_in": 24370,
+      "tokens_out": 2416,
+      "tokens_cached": 0,
+      "cost_usd": 0.0051051,
+      "empty_tasks": [
+        "chain_word_count_multiply"
+      ],
+      "abort_reason": null,
+      "temperature_sent": true
+    },
+    {
+      "model": "openai/gpt-4o-mini",
+      "run_n": 3,
+      "pass": 16,
+      "total": 16,
+      "tokens_in": 24300,
+      "tokens_out": 2299,
+      "tokens_cached": 0,
+      "cost_usd": 0.0050243999999999974,
+      "empty_tasks": [],
+      "abort_reason": null,
+      "temperature_sent": true
+    },
+    {
+      "model": "mistralai/mistral-large-2512",
+      "run_n": 1,
+      "pass": 15,
+      "total": 16,
+      "tokens_in": 25743,
+      "tokens_out": 4414,
+      "tokens_cached": 13056,
+      "cost_usd": 0.019492499999999996,
+      "empty_tasks": [
+        "chain_word_count_multiply"
+      ],
+      "abort_reason": null,
+      "temperature_sent": true
+    },
+    {
+      "model": "mistralai/mistral-large-2512",
+      "run_n": 2,
+      "pass": 1,
+      "total": 16,
+      "tokens_in": 1324,
+      "tokens_out": 317,
+      "tokens_cached": 640,
+      "cost_usd": 0.0011375,
+      "empty_tasks": [],
+      "abort_reason": "rate_limited",
+      "temperature_sent": true
+    },
+    {
+      "model": "openai/gpt-6.1-sol",
+      "run_n": 1,
+      "pass": 15,
+      "total": 16,
+      "tokens_in": 25180,
+      "tokens_out": 4680,
+      "tokens_cached": 0,
+      "cost_usd": 0.09715999999999998,
+      "empty_tasks": [],
+      "abort_reason": null,
+      "temperature_sent": false
+    },
+    {
+      "model": "openai/gpt-6.1-sol",
+      "run_n": 2,
+      "pass": 16,
+      "total": 16,
+      "tokens_in": 22227,
+      "tokens_out": 4132,
+      "tokens_cached": 0,
+      "cost_usd": 0.08577399999999999,
+      "empty_tasks": [],
+      "abort_reason": null,
+      "temperature_sent": false
+    },
+    {
+      "model": "openai/gpt-6.1-sol",
+      "run_n": 3,
+      "pass": 15,
+      "total": 16,
+      "tokens_in": 22836,
+      "tokens_out": 4610,
+      "tokens_cached": 0,
+      "cost_usd": 0.09177199999999999,
+      "empty_tasks": [],
+      "abort_reason": null,
+      "temperature_sent": false
+    },
+    {
+      "model": "anthropic/claude-opus-5.5",
+      "run_n": 1,
+      "pass": 0,
+      "total": 16,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_cached": null,
+      "cost_usd": 0,
+      "empty_tasks": [],
+      "abort_reason": "http_errors",
+      "temperature_sent": null
+    }
+  ],
+  "modelSummaries": {
+    "nex-agi/nex-n2.5-pro": {
+      "passes": [
+        16,
+        15,
+        16
+      ],
+      "mean": 15.666666666666666,
+      "spread": 1,
+      "abortedRuns": 0,
+      "totalCost": 0.012601575,
+      "totalIn": 113721,
+      "totalOut": 16290,
+      "totalCached": 41856
+    },
+    "anthropic/claude-haiku-5.5": {
+      "passes": [
+        16,
+        16,
+        14
+      ],
+      "mean": 15.333333333333334,
+      "spread": 2,
+      "abortedRuns": 0,
+      "totalCost": 0.014222199999999999,
+      "totalIn": 90077,
+      "totalOut": 10429,
+      "totalCached": 0
+    },
+    "openai/gpt-4o-mini": {
+      "passes": [
+        15,
+        15,
+        16
+      ],
+      "mean": 15.333333333333334,
+      "spread": 1,
+      "abortedRuns": 0,
+      "totalCost": 0.015169649999999996,
+      "totalIn": 72963,
+      "totalOut": 7042,
+      "totalCached": 0
+    },
+    "mistralai/mistral-large-2512": {
+      "passes": [
+        15
+      ],
+      "mean": 15,
+      "spread": 0,
+      "abortedRuns": 1,
+      "totalCost": 0.020629999999999996,
+      "totalIn": 27067,
+      "totalOut": 4731,
+      "totalCached": 13696
+    },
+    "openai/gpt-6.1-sol": {
+      "passes": [
+        15,
+        16,
+        15
+      ],
+      "mean": 15.333333333333334,
+      "spread": 1,
+      "abortedRuns": 0,
+      "totalCost": 0.274706,
+      "totalIn": 70243,
+      "totalOut": 13422,
+      "totalCached": 0
+    },
+    "anthropic/claude-opus-5.5": {
+      "passes": [],
+      "mean": null,
+      "spread": null,
+      "abortedRuns": 1,
+      "totalCost": 0,
+      "totalIn": 0,
+      "totalOut": 0,
+      "totalCached": null
+    }
+  },
+  "skippedModels": [
+    {
+      "model": "mistralai/mistral-large-2512",
+      "worst_case": 1.1037720000000002,
+      "remaining": 34.938514075,
+      "shortfall": 0,
+      "reason": "rate_limited"
+    }
+  ],
+  "creditTopUp": 0,
+  "capShortfall": 0
+}
