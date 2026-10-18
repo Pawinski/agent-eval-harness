@@ -100,14 +100,18 @@ export class RateLimitExhaustedError extends Error {
   }
 }
 
-/** Parse RETRY_DELAYS_MS (comma-separated ms, e.g. "15000,60000,180000"); undefined if unset/invalid.
- * Rejects empty pieces like "1,,2" or trailing commas. */
+/** Parse RETRY_DELAYS_MS (comma-separated positive integers, e.g. "15000,60000,180000"); undefined if unset/invalid.
+ * Rejects empty pieces, 0, decimals, scientific notation, negative values. */
 export function parseRetryDelaysEnv(raw: string | undefined): number[] | undefined {
   if (!raw) return undefined;
   const pieces = raw.split(",");
   if (pieces.length === 0 || pieces.some((p) => p.trim() === "")) return undefined;
-  const parts = pieces.map((p) => Number(p.trim()));
-  if (parts.some((n) => !Number.isFinite(n) || n < 0)) return undefined;
+  const parts: number[] = [];
+  for (const piece of pieces) {
+    const trimmed = piece.trim();
+    if (!/^[1-9]\d*$/.test(trimmed)) return undefined;
+    parts.push(parseInt(trimmed, 10));
+  }
   return parts;
 }
 

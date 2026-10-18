@@ -26,7 +26,6 @@ import {
   getSuiteVersionPath,
   runCheck,
   SUITE_VERSION,
-  TASKS,
   TASKS_V2,
   type SuiteTask,
 } from "./suite/index.js";
@@ -43,7 +42,7 @@ type CliArgs = {
 };
 
 function parseArgs(argv: string[]): CliArgs {
-  const out: CliArgs = { fixture: false, help: false, suite: "0.1.0" };
+  const out: CliArgs = { fixture: false, help: false, suite: "0.2.0" };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--fixture" || a === "-f") out.fixture = true;
@@ -160,7 +159,7 @@ Usage:
 Options:
   --fixture, -f   Use frozen fixture answers (no LLM / offline smoke)
   --task, -t      Run a single task id
-  --suite, -s     Suite version (0.1.0 or 0.2.0, default: 0.1.0)
+  --suite, -s     Suite version (default: 0.2.0)
   --help, -h      Show help
 
 Env:
@@ -172,9 +171,6 @@ Score: pass/N on suite version. Deterministic checkers only (no human grader).
 }
 
 function getSuiteTasksList(suite: string): SuiteTask[] {
-  if (suite === "0.1.0") {
-    return TASKS;
-  }
   if (suite === "0.2.0") {
     return TASKS_V2.map((t) => ({
       id: t.id,
@@ -206,7 +202,7 @@ async function main(): Promise<void> {
     allTasks = getSuiteTasksList(suiteVersion);
   } catch {
     console.error(`Unknown suite version: ${suiteVersion}`);
-    console.error(`Available suites: 0.1.0, 0.2.0`);
+    console.error(`Available suites: 0.2.0`);
     process.exit(2);
   }
 

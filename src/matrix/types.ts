@@ -2,7 +2,7 @@
  * Types for the multi-model matrix runner.
  */
 
-import { TASKS, TASKS_V2, type SuiteTask, type SuiteTaskV2 } from "../suite/index.js";
+import { TASKS_V2, type SuiteTask, type SuiteTaskV2 } from "../suite/index.js";
 
 export interface ModelPricing {
   modelId: string;
@@ -42,9 +42,6 @@ export class MatrixAbort extends Error {
 }
 
 export function getSuiteTasks(version: string): SuiteTask[] {
-  if (version === "0.1.0") {
-    return TASKS;
-  }
   if (version === "0.2.0") {
     return TASKS_V2.map((t) => ({
       id: t.id,
@@ -121,7 +118,7 @@ export const DEFAULT_MODELS = [
   "anthropic/claude-opus-5.5",
 ];
 
-export const DEFAULT_SUITE = "0.1.0";
+export const DEFAULT_SUITE = "0.2.0";
 export const DEFAULT_RUNS = 3;
 
 export function getDefaultMaxInputTokens(maxSteps: number): number {

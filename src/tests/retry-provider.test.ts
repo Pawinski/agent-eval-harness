@@ -464,7 +464,7 @@ describe("matrix integration with retries", () => {
     });
 
     const { runs, skippedModels } = await runMatrix(
-      { suite: "0.1.0", models: ["test/model", "test/model2"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["test/model", "test/model2"], runs: 1, capUsd: 100, fixture: false },
       testPriceData,
       { llmClientFactory, skipFileWrites: true },
     );
@@ -512,7 +512,7 @@ describe("matrix integration with retries", () => {
     };
 
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
       testPriceData,
       { llmClientFactory, skipFileWrites: true },
     );
@@ -541,7 +541,7 @@ describe("matrix integration with retries", () => {
     });
 
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
       testPriceData,
       { llmClientFactory, skipFileWrites: true },
     );
@@ -568,7 +568,7 @@ describe("matrix integration with retries", () => {
     };
 
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
       testPriceData,
       { llmClientFactory, skipFileWrites: true },
     );
@@ -592,7 +592,7 @@ describe("matrix integration with retries", () => {
     });
 
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
       testPriceData,
       { llmClientFactory, skipFileWrites: true },
     );
@@ -619,7 +619,7 @@ describe("matrix integration with retries", () => {
     });
 
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
       testPriceData,
       { llmClientFactory, skipFileWrites: true },
     );
@@ -703,7 +703,7 @@ describe("full matrix run with scripted fetch", () => {
     };
 
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models, runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models, runs: 1, capUsd: 100, fixture: false },
       priceData,
       { llmClientFactory, skipFileWrites: true },
     );
@@ -728,7 +728,7 @@ describe("full matrix run with scripted fetch", () => {
     };
 
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: true },
+      { suite: "0.2.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: true },
       priceData,
       { skipFileWrites: true },
     );

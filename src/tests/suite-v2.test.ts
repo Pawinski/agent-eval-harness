@@ -123,33 +123,14 @@ describe("suite 0.2.0 matrix fixture", () => {
   });
 });
 
-describe("suite 0.1.0 unchanged", () => {
-  it("getSuiteTasks returns 7 tasks for 0.1.0", () => {
-    const tasks = getSuiteTasks("0.1.0");
-    expect(tasks.length).toBe(7);
-  });
-
-  it("SUITE_CONFIGS 0.1.0 unchanged", () => {
+describe("suite 0.1.0 config preserved", () => {
+  it("SUITE_CONFIGS 0.1.0 unchanged (for historical results)", () => {
     const config = SUITE_CONFIGS["0.1.0"];
     expect(config.version).toBe("0.1.0");
     expect(config.taskCount).toBe(7);
     expect(config.maxSteps).toBe(8);
     expect(config.maxInputTokens).toBe(3000);
     expect(config.defaultCapUsd).toBe(10.0);
-  });
-
-  it("0.1.0 fixture mode scores 7/7", async () => {
-    const models = ["test/model"];
-    const priceData = createFixturePrices(models);
-
-    const { runs } = await runMatrix(
-      { suite: "0.1.0", models, runs: 1, capUsd: 100, fixture: true },
-      priceData,
-      { skipFileWrites: true },
-    );
-
-    expect(runs[0].pass).toBe(7);
-    expect(runs[0].total).toBe(7);
   });
 });
 

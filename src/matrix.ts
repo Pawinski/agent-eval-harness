@@ -151,7 +151,7 @@ Options:
   --suite, -s     Suite version (default: ${DEFAULT_SUITE})
   --models, -m    Comma-separated model list (default: sorted by worst-case cost)
   --runs, -r      Runs per model (default: ${DEFAULT_RUNS})
-  --cap-usd, -c   Global cost cap in USD (default: $10 for 0.1.0, $35 for 0.2.0)
+  --cap-usd, -c   Global cost cap in USD (default: $35 for 0.2.0)
   --credit-usd    Override credit check with fixed value (use if endpoints fail)
   --fixture, -f   Use fixture answers (no LLM, $0 cost, no API key required)
   --help, -h      Show help

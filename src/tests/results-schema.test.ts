@@ -71,6 +71,26 @@ describe("results schema validation", () => {
     expect(jsonFiles.length).toBeGreaterThanOrEqual(1);
   });
 
+  it("results/0.1.0 result files render with tasks.ts gone", () => {
+    const suiteDir = path.join(RESULTS_DIR, "0.1.0");
+    let found = false;
+    try {
+      const entries = readdirSync(suiteDir);
+      for (const entry of entries) {
+        if (entry.endsWith(".json") && !entry.startsWith("_")) {
+          const content = readFileSync(path.join(suiteDir, entry), "utf8");
+          const data = JSON.parse(content) as ResultRow;
+          expect(data.suite).toBe("0.1.0");
+          expect(data.total).toBe(7);
+          found = true;
+        }
+      }
+    } catch {
+      // Directory might not exist
+    }
+    expect(found).toBe(true);
+  });
+
   for (const filePath of jsonFiles) {
     const relPath = path.relative(RESULTS_DIR, filePath);
 
