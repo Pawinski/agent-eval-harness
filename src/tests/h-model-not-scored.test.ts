@@ -54,6 +54,18 @@ describe("h: any aborted run makes the model not scored", () => {
     expect(md).toContain("| m/mix | 2 | not scored (rate_limited) |");
   });
 
+  it("repeated abort reasons are listed once: two rate_limited aborts read exactly 'not scored (rate_limited)'", async () => {
+    const twice = [run("m/rl", 1, 0, "rate_limited"), run("m/rl", 2, 0, "rate_limited"), run("m/rl", 3, 16)];
+    const { jsonPath, mdPath } = await writeSummaryFiles(twice, "0.2.0", { fetchedAt: "t", models: new Map() } as never, 35, false, 16, true);
+    expect(JSON.parse(written.get(jsonPath)!).modelSummaries["m/rl"]).toMatchObject({ passes: [16], mean: null, spread: null, abortedRuns: 2 });
+    const row = written.get(mdPath)!.split("\n").find((l) => l.startsWith("| m/rl | 16/16 |"));
+    expect(row).toBe("| m/rl | 16/16 | - | - | $0.003000 | not scored (rate_limited) |");
+    const lines: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => { lines.push(a.join(" ")); });
+    printSummaryToConsole(twice, "0.2.0", 35, 16);
+    expect(lines.find((l) => l.startsWith("| m/rl | 16/16 |"))).toContain("| not scored (rate_limited) |");
+  });
+
   it("console per-model summary uses the same rule", () => {
     const lines: string[] = [];
     vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => { lines.push(a.join(" ")); });
