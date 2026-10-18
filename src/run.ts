@@ -67,7 +67,7 @@ interface RunOneTaskOpts {
   fixture: boolean;
   runId: string;
   suite: string;
-  tools?: McpToolClient;
+  toolsFactory?: () => McpToolClient;
   maxSteps?: number;
   maxObservationChars?: number;
 }
@@ -76,7 +76,7 @@ async function runOneTask(
   task: SuiteTask,
   opts: RunOneTaskOpts,
 ): Promise<TaskOutcome> {
-  const tools = opts.tools ?? createDefaultMcpClient();
+  const tools = opts.toolsFactory ? opts.toolsFactory() : createDefaultMcpClient();
   const llm = createLlmClient();
   const agentLog: unknown[] = [];
 
@@ -223,12 +223,14 @@ async function main(): Promise<void> {
       ? "live"
       : "dry-run";
 
-  let suiteTools: McpToolClient | undefined;
+  let toolsFactory: (() => McpToolClient) | undefined;
   let maxObservationChars: number | undefined;
 
   if (suiteVersion === "0.2.0") {
-    const v2Ctx = createToolsV2Context();
-    suiteTools = new InProcessMcpClient(createToolsV2Options(v2Ctx));
+    toolsFactory = () => {
+      const v2Ctx = createToolsV2Context();
+      return new InProcessMcpClient(createToolsV2Options(v2Ctx));
+    };
     maxObservationChars = 4096;
   }
 
@@ -244,7 +246,7 @@ async function main(): Promise<void> {
       fixture: args.fixture,
       runId,
       suite: suiteVersion,
-      tools: suiteTools,
+      toolsFactory,
       maxSteps,
       maxObservationChars,
     });

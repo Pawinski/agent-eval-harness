@@ -147,7 +147,7 @@ interface RunContext {
   globalCapUsd?: number;
   fixture: boolean;
   suite: string;
-  tools?: McpToolClient;
+  toolsFactory?: () => McpToolClient;
   maxObservationChars?: number;
 }
 
@@ -271,7 +271,7 @@ async function runOneTaskWithTracking(
     };
   }
 
-  const tools = ctx.tools ?? createDefaultMcpClient();
+  const tools = ctx.toolsFactory ? ctx.toolsFactory() : createDefaultMcpClient();
   const baseLlm = llmClientFactory
     ? llmClientFactory(ctx.model, MAX_COMPLETION_TOKENS)
     : createLlmClient({ defaultModel: ctx.model, maxTokens: MAX_COMPLETION_TOKENS });
@@ -445,12 +445,14 @@ export async function runMatrix(
   const maxInputTokens = suiteConfig.maxInputTokens;
   const iMax = getDefaultIMax(config.suite, maxSteps);
 
-  let suiteTools: McpToolClient | undefined;
+  let toolsFactory: (() => McpToolClient) | undefined;
   let maxObservationChars: number | undefined;
 
   if (config.suite === "0.2.0") {
-    const v2Ctx = createToolsV2Context();
-    suiteTools = new InProcessMcpClient(createToolsV2Options(v2Ctx));
+    toolsFactory = () => {
+      const v2Ctx = createToolsV2Context();
+      return new InProcessMcpClient(createToolsV2Options(v2Ctx));
+    };
     maxObservationChars = 4096;
   }
 
@@ -516,7 +518,7 @@ export async function runMatrix(
         globalCapUsd: config.capUsd,
         fixture: config.fixture,
         suite: config.suite,
-        tools: suiteTools,
+        toolsFactory,
         maxObservationChars,
       };
 
