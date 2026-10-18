@@ -49,18 +49,15 @@ describe("suite 0.2.0 fixture answers", () => {
     }
   });
 
-  it("patch tasks accept any case with optional trailing period", () => {
+  it("patch tasks use exact token match", () => {
     const patchTasks = TASKS_V2.filter((t) => t.category === "patch");
     expect(patchTasks.length).toBe(3);
     
     for (const task of patchTasks) {
-      expect(runCheck("fixed", 0, task.check).pass).toBe(true);
-      expect(runCheck("Fixed", 0, task.check).pass).toBe(true);
-      expect(runCheck("FIXED", 0, task.check).pass).toBe(false);
-      expect(runCheck("fixed.", 0, task.check).pass).toBe(true);
-      expect(runCheck("Fixed.", 0, task.check).pass).toBe(true);
-      expect(runCheck("fixed!", 0, task.check).pass).toBe(false);
-      expect(runCheck("notfixed", 0, task.check).pass).toBe(false);
+      expect(runCheck("fixed", 0, task.check).pass).toBe(false);
+      expect(runCheck("Fixed", 0, task.check).pass).toBe(false);
+      expect(task.fixtureAnswer).toMatch(/^[0-9a-f]{8}$/);
+      expect(runCheck(task.fixtureAnswer!, 0, task.check).pass).toBe(true);
     }
   });
 });

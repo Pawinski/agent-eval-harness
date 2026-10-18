@@ -3,6 +3,7 @@
  * Includes all v1 tools (echo, add, json_get, regex_extract, word_count) plus v2 tools.
  */
 
+import { createHash } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -67,7 +68,7 @@ function resolveFixturePath(relativePath: string): string | null {
 export function createReadFileTool(): McpToolSchema & { handler: ToolHandler } {
   return {
     name: "read_file",
-    description: "Read a fixture file by relative path (e.g. code/calculator.ts). Returns file contents.",
+    description: "Read a fixture file (path: relative path like code/calculator.ts or data/inventory.csv). Returns numbered lines.",
     inputSchema: {
       type: "object",
       properties: {
@@ -106,7 +107,7 @@ export function createReadFileTool(): McpToolSchema & { handler: ToolHandler } {
 export function createApplyPatchTool(ctx: ToolsV2Context): McpToolSchema & { handler: ToolHandler } {
   return {
     name: "apply_patch",
-    description: "Replace a line in a fixture file in memory. Use old_line to match and new_line to replace.",
+    description: "Replace a line in a fixture file (path, old_line: line to find, new_line: replacement). Matching ignores leading/trailing whitespace.",
     inputSchema: {
       type: "object",
       properties: {
@@ -165,7 +166,7 @@ export function createApplyPatchTool(ctx: ToolsV2Context): McpToolSchema & { han
 export function createRunCheckTool(ctx: ToolsV2Context): McpToolSchema & { handler: ToolHandler } {
   return {
     name: "run_check",
-    description: "Run a fixture check on a patched file. Returns exit code 0 on success, 1 on failure.",
+    description: "Run a named check (check: sum_array | find_max | greet) on a patched file (path). Returns exit code and result.",
     inputSchema: {
       type: "object",
       properties: {
@@ -182,8 +183,14 @@ export function createRunCheckTool(ctx: ToolsV2Context): McpToolSchema & { handl
         return { ok: false, content: "", error: "path and check are required" };
       }
 
+      const validChecks = ["sum_array", "find_max", "greet"];
+      if (!validChecks.includes(checkName)) {
+        return { ok: true, content: `exit 1\nunknown check: ${checkName}` };
+      }
+
       let content: string;
-      if (ctx.patchState.patched.has(relativePath)) {
+      const wasPatched = ctx.patchState.patched.has(relativePath);
+      if (wasPatched) {
         content = ctx.patchState.patched.get(relativePath)!;
       } else {
         const fullPath = resolveFixturePath(relativePath);
@@ -193,7 +200,14 @@ export function createRunCheckTool(ctx: ToolsV2Context): McpToolSchema & { handl
         content = readFileSync(fullPath, "utf8");
       }
 
-      const result = runFixtureCheck(content, checkName);
+      const result = runFixtureCheck(content, checkName, wasPatched);
+      if (result.exitCode === 0 && result.token) {
+        return {
+          ok: true,
+          content: `exit 0\nverification: ${result.token}`,
+          data: result,
+        };
+      }
       return {
         ok: true,
         content: `exit ${result.exitCode}`,
@@ -207,30 +221,74 @@ interface CheckResult {
   exitCode: number;
   passed: boolean;
   message: string;
+  token?: string;
 }
 
-function runFixtureCheck(content: string, checkName: string): CheckResult {
+function extractFunctionSource(content: string, funcName: string): string {
+  const lines = content.split("\n");
+  let inFunc = false;
+  let braceCount = 0;
+  const funcLines: string[] = [];
+  
+  for (const line of lines) {
+    if (!inFunc && line.includes(`function ${funcName}`)) {
+      inFunc = true;
+    }
+    if (inFunc) {
+      funcLines.push(line);
+      braceCount += (line.match(/\{/g) || []).length;
+      braceCount -= (line.match(/\}/g) || []).length;
+      if (braceCount === 0 && funcLines.length > 0) {
+        break;
+      }
+    }
+  }
+  return funcLines.join("\n");
+}
+
+function computeVerificationToken(checkName: string, fixedSource: string): string {
+  const hash = createHash("sha256");
+  hash.update(`${checkName}:${fixedSource}`);
+  return hash.digest("hex").slice(0, 8);
+}
+
+function runFixtureCheck(content: string, checkName: string, wasPatched: boolean): CheckResult {
   switch (checkName) {
     case "sum_array": {
       const hasBug = content.includes("i <= arr.length");
       if (hasBug) {
-        return { exitCode: 1, passed: false, message: "sumArray has off-by-one bug" };
+        return { exitCode: 1, passed: false, message: "check failed" };
       }
-      return { exitCode: 0, passed: true, message: "sumArray check passed" };
+      if (!wasPatched) {
+        return { exitCode: 1, passed: false, message: "check failed" };
+      }
+      const funcSource = extractFunctionSource(content, "sumArray");
+      const token = computeVerificationToken(checkName, funcSource);
+      return { exitCode: 0, passed: true, message: "check passed", token };
     }
     case "find_max": {
       const hasBug = content.includes("arr[i] < max");
       if (hasBug) {
-        return { exitCode: 1, passed: false, message: "findMax comparison is inverted" };
+        return { exitCode: 1, passed: false, message: "check failed" };
       }
-      return { exitCode: 0, passed: true, message: "findMax check passed" };
+      if (!wasPatched) {
+        return { exitCode: 1, passed: false, message: "check failed" };
+      }
+      const funcSource = extractFunctionSource(content, "findMax");
+      const token = computeVerificationToken(checkName, funcSource);
+      return { exitCode: 0, passed: true, message: "check passed", token };
     }
     case "greet": {
       const hasBug = content.includes('+ "?"');
       if (hasBug) {
-        return { exitCode: 1, passed: false, message: "greet uses wrong punctuation" };
+        return { exitCode: 1, passed: false, message: "check failed" };
       }
-      return { exitCode: 0, passed: true, message: "greet check passed" };
+      if (!wasPatched) {
+        return { exitCode: 1, passed: false, message: "check failed" };
+      }
+      const funcSource = extractFunctionSource(content, "greet");
+      const token = computeVerificationToken(checkName, funcSource);
+      return { exitCode: 0, passed: true, message: "check passed", token };
     }
     default:
       return { exitCode: 1, passed: false, message: `unknown check: ${checkName}` };
@@ -240,7 +298,7 @@ function runFixtureCheck(content: string, checkName: string): CheckResult {
 export function createCsvQueryTool(): McpToolSchema & { handler: ToolHandler } {
   return {
     name: "csv_query",
-    description: "Query a CSV fixture file. Supports filter (column=value) and aggregate (sum:column, count, avg:column).",
+    description: "Query a CSV file (path). Options: filter as column=value, aggregate as sum:column or avg:column or count.",
     inputSchema: {
       type: "object",
       properties: {
@@ -288,15 +346,17 @@ export function createCsvQueryTool(): McpToolSchema & { handler: ToolHandler } {
         });
 
         if (filter) {
-          const match = filter.match(/^(\w+)\s*=\s*(.+)$/);
-          if (match) {
-            const [, col, rawVal] = match;
-            const val = rawVal.replace(/^["']|["']$/g, "").trim();
-            const beforeCount = rows.length;
-            rows = rows.filter((r) => r[col]?.toLowerCase() === val.toLowerCase());
-            if (rows.length === 0 && beforeCount > 0) {
-              return { ok: false, content: "", error: `no rows match filter: ${col}=${val}` };
-            }
+          const trimmed = filter.trim();
+          const match = trimmed.match(/^(\w+)\s*=\s*(.+)$/);
+          if (!match) {
+            return { ok: false, content: "", error: `invalid filter format: ${filter} (use column=value)` };
+          }
+          const [, col, rawVal] = match;
+          const val = rawVal.trim().replace(/^["']|["']$/g, "").trim();
+          const beforeCount = rows.length;
+          rows = rows.filter((r) => r[col]?.toLowerCase() === val.toLowerCase());
+          if (rows.length === 0 && beforeCount > 0) {
+            return { ok: false, content: "", error: `no rows match filter: ${col}=${val}` };
           }
         }
 
@@ -347,7 +407,7 @@ export function createCsvQueryTool(): McpToolSchema & { handler: ToolHandler } {
 export function createFlakySumTool(ctx: ToolsV2Context): McpToolSchema & { handler: ToolHandler } {
   return {
     name: "flaky_sum",
-    description: "Sum two numbers. May fail on first attempt - retry on error.",
+    description: "Compute a + b. May fail transiently on first call; retry on error.",
     inputSchema: {
       type: "object",
       properties: {
@@ -382,7 +442,7 @@ export function createFlakyLookupTool(ctx: ToolsV2Context): McpToolSchema & { ha
 
   return {
     name: "flaky_lookup",
-    description: "Look up a product name by SKU. May fail on first attempt - retry on error.",
+    description: "Look up product name by sku. May fail transiently on first call; retry on error.",
     inputSchema: {
       type: "object",
       properties: {
@@ -410,23 +470,21 @@ export function createFlakyLookupTool(ctx: ToolsV2Context): McpToolSchema & { ha
   };
 }
 
-/** Returns schemas for all 11 tools available in suite 0.2.0 (5 v1 + 6 v2). */
-export function getToolsV2Schemas(): McpToolSchema[] {
-  const v1Schemas = getDefaultToolDefinitions().map(({ handler: _h, ...schema }) => schema);
-  const v2Schemas: McpToolSchema[] = [
-    { name: "read_file", description: "Read a fixture file by relative path (e.g. code/calculator.ts). Returns file contents.", inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
-    { name: "apply_patch", description: "Replace a line in a fixture file in memory. Use old_line to match and new_line to replace.", inputSchema: { type: "object", properties: { path: { type: "string" }, old_line: { type: "string" }, new_line: { type: "string" } }, required: ["path", "old_line", "new_line"] } },
-    { name: "run_check", description: "Run a fixture check on a patched file. Returns exit code 0 on success, 1 on failure.", inputSchema: { type: "object", properties: { path: { type: "string" }, check: { type: "string" } }, required: ["path", "check"] } },
-    { name: "csv_query", description: "Query a CSV fixture file. Supports filter (column=value) and aggregate (sum:column, count, avg:column).", inputSchema: { type: "object", properties: { path: { type: "string" }, filter: { type: "string" }, aggregate: { type: "string" }, select: { type: "string" } }, required: ["path"] } },
-    { name: "flaky_sum", description: "Sum two numbers. May fail on first attempt - retry on error.", inputSchema: { type: "object", properties: { a: { type: "number" }, b: { type: "number" } }, required: ["a", "b"] } },
-    { name: "flaky_lookup", description: "Look up a product name by SKU. May fail on first attempt - retry on error.", inputSchema: { type: "object", properties: { sku: { type: "string" } }, required: ["sku"] } },
-  ];
-  return [...v1Schemas, ...v2Schemas];
-}
+/** Enhanced v1 tool descriptions for 0.2.0 (makes arguments discoverable). */
+const V1_DESCRIPTION_OVERRIDES: Record<string, string> = {
+  echo: "Return the input unchanged (text: string to return).",
+  add: "Compute a + b (a and b: numbers).",
+  json_get: "Extract a value from JSON (json: JSON string, key: property name).",
+  regex_extract: "Extract first capture group (text: input, pattern: regex with one capture).",
+  word_count: "Count words (text: string to count).",
+};
 
 /** Creates tool options with all 11 tools (5 v1 + 6 v2) for suite 0.2.0. */
 export function createToolsV2Options(ctx: ToolsV2Context): InProcessMcpOptions {
-  const v1Tools = getDefaultToolDefinitions();
+  const v1Tools = getDefaultToolDefinitions().map((tool) => ({
+    ...tool,
+    description: V1_DESCRIPTION_OVERRIDES[tool.name] ?? tool.description,
+  }));
   const v2Tools = [
     createReadFileTool(),
     createApplyPatchTool(ctx),

@@ -85,7 +85,7 @@ The matrix runner evaluates multiple models across multiple runs with cost caps.
 OPENROUTER_API_KEY=... npm run matrix
 ```
 
-**Suite 0.2.0** (when available):
+**Suite 0.2.0:**
 
 ```bash
 OPENROUTER_API_KEY=... npm run matrix -- --suite 0.2.0
@@ -167,7 +167,7 @@ npm run eval -- --suite 0.2.0 --fixture
 npm run matrix -- --suite 0.2.0 --fixture
 ```
 
-Suite 0.2.0 introduces 6 new tools (11 total): `read_file`, `apply_patch`, `run_check`, `csv_query`, `flaky_sum`, `flaky_lookup`. Tasks see either a subset (via `expectedTools`) or the full catalog (selection tasks).
+Suite 0.2.0 introduces 6 new tools (11 total): `read_file`, `apply_patch`, `run_check`, `csv_query`, `flaky_sum`, `flaky_lookup`. Chain and selection tasks see the full 11-tool catalog; other tasks see only their listed subset (via `expectedTools`).
 
 ### Suite 0.2.0 defaults
 

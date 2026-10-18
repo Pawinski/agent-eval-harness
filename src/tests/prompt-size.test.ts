@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { TASKS_V2 } from "../suite/tasks-v2.js";
-import { getToolsV2Schemas, createToolsV2Options, createToolsV2Context } from "../mcp/tools-v2.js";
-import { InProcessMcpClient } from "../mcp/client.js";
+import { createToolsV2Options, createToolsV2Context } from "../mcp/tools-v2.js";
+import { InProcessMcpClient, type McpToolSchema } from "../mcp/client.js";
 
 const DEFAULT_SYSTEM_PROMPT = `You are a ReAct agent. Use this format strictly:
 
@@ -22,21 +22,25 @@ function estimateTokens(text: string, charsPerToken = 4): number {
 }
 
 describe("prompt size constraints for 0.2.0", () => {
-  const ctx = createToolsV2Context();
-  const client = new InProcessMcpClient(createToolsV2Options(ctx));
-  
-  it("uses live tool catalog from actual client", async () => {
-    const liveTools = await client.listTools();
+  let liveTools: McpToolSchema[] = [];
+  let toolCatalog = "";
+  let systemContent = "";
+
+  beforeAll(async () => {
+    const ctx = createToolsV2Context();
+    const client = new InProcessMcpClient(createToolsV2Options(ctx));
+    liveTools = await client.listTools();
+    toolCatalog = liveTools.map((t) => `- ${t.name}: ${t.description}`).join("\n");
+    systemContent = `${DEFAULT_SYSTEM_PROMPT}\n\nAvailable tools:\n${toolCatalog}`;
+  });
+
+  it("live tool catalog has 11 tools", () => {
     expect(liveTools.length).toBe(11);
   });
-  
-  const toolSchemas = getToolsV2Schemas();
-  const toolCatalog = toolSchemas.map((t) => `- ${t.name}: ${t.description}`).join("\n");
-  const systemContent = `${DEFAULT_SYSTEM_PROMPT}\n\nAvailable tools:\n${toolCatalog}`;
 
-  it("system prompt + catalog under 400 tokens", () => {
+  it("system prompt + catalog under 500 tokens", () => {
     const tokens = estimateTokens(systemContent);
-    expect(tokens).toBeLessThan(400);
+    expect(tokens).toBeLessThan(500);
   });
 
   it("each task prompt under 200 tokens", () => {
@@ -59,13 +63,21 @@ describe("prompt size constraints for 0.2.0", () => {
   });
 
   it("tool catalog is reasonable size", () => {
-    expect(toolCatalog.length).toBeLessThan(1000);
+    expect(toolCatalog.length).toBeLessThan(1200);
   });
 });
 
 describe("task prompt content", () => {
+  let toolNames: string[] = [];
+
+  beforeAll(async () => {
+    const ctx = createToolsV2Context();
+    const client = new InProcessMcpClient(createToolsV2Options(ctx));
+    const liveTools = await client.listTools();
+    toolNames = liveTools.map((t) => t.name);
+  });
+
   it("no task prompt contains any tool name as whole word (all 11 tools, all 16 tasks)", () => {
-    const toolNames = getToolsV2Schemas().map((t) => t.name);
     expect(toolNames.length).toBe(11);
     expect(TASKS_V2.length).toBe(16);
     

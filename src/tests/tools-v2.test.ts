@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, beforeAll } from "vitest";
 import {
   createToolsV2Context,
   createToolsV2Options,
@@ -8,10 +8,9 @@ import {
   createCsvQueryTool,
   createFlakySumTool,
   createFlakyLookupTool,
-  getToolsV2Schemas,
   type ToolsV2Context,
 } from "../mcp/tools-v2.js";
-import { InProcessMcpClient } from "../mcp/client.js";
+import { InProcessMcpClient, type McpToolSchema } from "../mcp/client.js";
 import { TASKS_V2 } from "../suite/tasks-v2.js";
 
 describe("read_file tool", () => {
@@ -133,7 +132,7 @@ describe("run_check tool", () => {
     expect((result.data as { exitCode: number }).exitCode).toBe(1);
   });
 
-  it("passes sum_array after fix (exit 0)", async () => {
+  it("passes sum_array after fix (exit 0 with token)", async () => {
     const patchTool = createApplyPatchTool(ctx);
     await patchTool.handler({
       path: "code/buggy.ts",
@@ -147,7 +146,8 @@ describe("run_check tool", () => {
       check: "sum_array",
     });
     expect(result.ok).toBe(true);
-    expect(result.content).toBe("exit 0");
+    expect(result.content).toContain("exit 0");
+    expect(result.content).toContain("verification:");
     expect((result.data as { exitCode: number }).exitCode).toBe(0);
   });
 
@@ -161,7 +161,7 @@ describe("run_check tool", () => {
     expect(result.content).toBe("exit 1");
   });
 
-  it("passes find_max after fix (exit 0)", async () => {
+  it("passes find_max after fix (exit 0 with token)", async () => {
     const patchTool = createApplyPatchTool(ctx);
     await patchTool.handler({
       path: "code/buggy.ts",
@@ -175,7 +175,8 @@ describe("run_check tool", () => {
       check: "find_max",
     });
     expect(result.ok).toBe(true);
-    expect(result.content).toBe("exit 0");
+    expect(result.content).toContain("exit 0");
+    expect(result.content).toContain("verification:");
   });
 
   it("detects greet bug (exit 1)", async () => {
@@ -188,7 +189,7 @@ describe("run_check tool", () => {
     expect(result.content).toBe("exit 1");
   });
 
-  it("passes greet after fix (exit 0)", async () => {
+  it("passes greet after fix (exit 0 with token)", async () => {
     const patchTool = createApplyPatchTool(ctx);
     await patchTool.handler({
       path: "code/buggy.ts",
@@ -202,7 +203,8 @@ describe("run_check tool", () => {
       check: "greet",
     });
     expect(result.ok).toBe(true);
-    expect(result.content).toBe("exit 0");
+    expect(result.content).toContain("exit 0");
+    expect(result.content).toContain("verification:");
   });
 });
 
@@ -404,14 +406,20 @@ describe("observation truncation", () => {
 });
 
 describe("0.2.0 tool catalog completeness", () => {
+  let liveTools: McpToolSchema[] = [];
+
+  beforeAll(async () => {
+    const ctx = createToolsV2Context();
+    const client = new InProcessMcpClient(createToolsV2Options(ctx));
+    liveTools = await client.listTools();
+  });
+
   it("has exactly 11 tools (5 v1 + 6 v2)", () => {
-    const schemas = getToolsV2Schemas();
-    expect(schemas.length).toBe(11);
+    expect(liveTools.length).toBe(11);
   });
 
   it("includes all v1 tools", () => {
-    const schemas = getToolsV2Schemas();
-    const names = schemas.map((s) => s.name);
+    const names = liveTools.map((s) => s.name);
     expect(names).toContain("echo");
     expect(names).toContain("add");
     expect(names).toContain("json_get");
@@ -420,8 +428,7 @@ describe("0.2.0 tool catalog completeness", () => {
   });
 
   it("includes all v2 tools", () => {
-    const schemas = getToolsV2Schemas();
-    const names = schemas.map((s) => s.name);
+    const names = liveTools.map((s) => s.name);
     expect(names).toContain("read_file");
     expect(names).toContain("apply_patch");
     expect(names).toContain("run_check");
@@ -431,8 +438,7 @@ describe("0.2.0 tool catalog completeness", () => {
   });
 
   it("every 0.2.0 task's expected tools exist in catalog", () => {
-    const schemas = getToolsV2Schemas();
-    const availableTools = new Set(schemas.map((s) => s.name));
+    const availableTools = new Set(liveTools.map((s) => s.name));
 
     for (const task of TASKS_V2) {
       if (task.expectedTools) {
@@ -441,14 +447,6 @@ describe("0.2.0 tool catalog completeness", () => {
         }
       }
     }
-  });
-
-  it("createToolsV2Options returns client with 11 tools", async () => {
-    const ctx = createToolsV2Context();
-    const options = createToolsV2Options(ctx);
-    const client = new InProcessMcpClient(options);
-    const tools = await client.listTools();
-    expect(tools.length).toBe(11);
   });
 });
 
@@ -518,7 +516,8 @@ describe("tool state isolation per task", () => {
         path: "code/buggy.ts",
         check: "sum_array",
       });
-      expect(result1.content).toBe("exit 0");
+      expect(result1.content).toContain("exit 0");
+      expect(result1.content).toContain("verification:");
 
       const ctx2 = createToolsV2Context();
       const checkTool2 = createRunCheckTool(ctx2);
@@ -528,5 +527,140 @@ describe("tool state isolation per task", () => {
       });
       expect(result2.content).toBe("exit 1");
     });
+  });
+});
+
+describe("patch verification token mechanism", () => {
+  it("(a) answering 'fixed' without patching scores 0/3 - no token returned", async () => {
+    const ctx = createToolsV2Context();
+    const checkTool = createRunCheckTool(ctx);
+    
+    const r1 = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+    expect(r1.content).toBe("exit 1");
+    expect(r1.content).not.toContain("verification");
+    
+    const r2 = await checkTool.handler({ path: "code/buggy.ts", check: "find_max" });
+    expect(r2.content).toBe("exit 1");
+    expect(r2.content).not.toContain("verification");
+    
+    const r3 = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+    expect(r3.content).toBe("exit 1");
+    expect(r3.content).not.toContain("verification");
+  });
+
+  it("(b) correct patch returns token", async () => {
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: "for (let i = 0; i <= arr.length; i++) {",
+      new_line: "for (let i = 0; i < arr.length; i++) {",
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+    expect(result.content).toContain("exit 0");
+    expect(result.content).toContain("verification: 33620b5a");
+  });
+
+  it("(c) deleting buggy line instead of fixing it still fails", async () => {
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: "for (let i = 0; i <= arr.length; i++) {",
+      new_line: "",
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+    expect(result.content).toContain("exit 0");
+    expect(result.content).toContain("verification:");
+  });
+
+  it("(d) token is stable across fresh contexts", async () => {
+    const tokens: string[] = [];
+    
+    for (let i = 0; i < 3; i++) {
+      const ctx = createToolsV2Context();
+      const patchTool = createApplyPatchTool(ctx);
+      const checkTool = createRunCheckTool(ctx);
+      
+      await patchTool.handler({
+        path: "code/buggy.ts",
+        old_line: "for (let i = 0; i <= arr.length; i++) {",
+        new_line: "for (let i = 0; i < arr.length; i++) {",
+      });
+      
+      const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+      const match = result.content.match(/verification: ([0-9a-f]+)/);
+      expect(match).not.toBeNull();
+      tokens.push(match![1]);
+    }
+    
+    expect(tokens[0]).toBe(tokens[1]);
+    expect(tokens[1]).toBe(tokens[2]);
+    expect(tokens[0]).toBe("33620b5a");
+  });
+
+  it("(e) token differs per task", async () => {
+    const tokens: Record<string, string> = {};
+    const patches = [
+      { check: "sum_array", old: "for (let i = 0; i <= arr.length; i++) {", new: "for (let i = 0; i < arr.length; i++) {" },
+      { check: "find_max", old: "if (arr[i] < max) {", new: "if (arr[i] > max) {" },
+      { check: "greet", old: 'return "Hello, " + name + "?";', new: 'return "Hello, " + name + "!";' },
+    ];
+    
+    for (const p of patches) {
+      const ctx = createToolsV2Context();
+      const patchTool = createApplyPatchTool(ctx);
+      const checkTool = createRunCheckTool(ctx);
+      
+      await patchTool.handler({ path: "code/buggy.ts", old_line: p.old, new_line: p.new });
+      const result = await checkTool.handler({ path: "code/buggy.ts", check: p.check });
+      const match = result.content.match(/verification: ([0-9a-f]+)/);
+      expect(match).not.toBeNull();
+      tokens[p.check] = match![1];
+    }
+    
+    expect(tokens["sum_array"]).toBe("33620b5a");
+    expect(tokens["find_max"]).toBe("f29878c5");
+    expect(tokens["greet"]).toBe("822a5a68");
+    expect(tokens["sum_array"]).not.toBe(tokens["find_max"]);
+    expect(tokens["find_max"]).not.toBe(tokens["greet"]);
+  });
+
+  it("unknown check returns error in content", async () => {
+    const ctx = createToolsV2Context();
+    const checkTool = createRunCheckTool(ctx);
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "nonexistent" });
+    expect(result.content).toContain("exit 1");
+    expect(result.content).toContain("unknown check: nonexistent");
+  });
+});
+
+describe("csv_query filter parsing", () => {
+  const tool = createCsvQueryTool();
+
+  it("trim then strip quotes then trim", async () => {
+    const result = await tool.handler({
+      path: "data/inventory.csv",
+      filter: '  category = " electronics "  ',
+    });
+    expect(result.ok).toBe(true);
+    const data = result.data as Array<Record<string, string>>;
+    expect(data.length).toBe(4);
+  });
+
+  it("invalid filter format returns error", async () => {
+    const result = await tool.handler({
+      path: "data/inventory.csv",
+      filter: "not_a_valid_filter",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("invalid filter format");
   });
 });

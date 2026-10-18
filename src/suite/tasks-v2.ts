@@ -150,10 +150,10 @@ Report only the exact error string.`,
     prompt: `The file code/buggy.ts contains a sumArray function with a bug.
 The loop condition causes an array index out-of-bounds error.
 Fix the bug by patching the file, then verify the array summation logic passes.
-Report "fixed" if the verification succeeds (exit 0), otherwise report "failed".`,
+Report the verification token from a passing check, or "failed" if it does not pass.`,
     expectedTools: ["read_file", "apply_patch", "run_check"],
-    check: { kind: "regex", pattern: "^[Ff]ixed\\.?$" },
-    fixtureAnswer: "fixed",
+    check: { kind: "exact", expected: "33620b5a" },
+    fixtureAnswer: "33620b5a",
     maxSteps: 10,
   },
   {
@@ -163,10 +163,10 @@ Report "fixed" if the verification succeeds (exit 0), otherwise report "failed".
     prompt: `The file code/buggy.ts contains a findMax function that returns the minimum instead of maximum.
 The comparison operator is wrong.
 Fix the bug by patching the file, then verify the maximum-finding logic passes.
-Report "fixed" if the verification succeeds (exit 0), otherwise report "failed".`,
+Report the verification token from a passing check, or "failed" if it does not pass.`,
     expectedTools: ["read_file", "apply_patch", "run_check"],
-    check: { kind: "regex", pattern: "^[Ff]ixed\\.?$" },
-    fixtureAnswer: "fixed",
+    check: { kind: "exact", expected: "f29878c5" },
+    fixtureAnswer: "f29878c5",
     maxSteps: 10,
   },
   {
@@ -175,10 +175,10 @@ Report "fixed" if the verification succeeds (exit 0), otherwise report "failed".
     description: "Fix wrong punctuation in greet function.",
     prompt: `The file code/buggy.ts contains a greeting function that uses a question mark instead of an exclamation mark.
 Fix the punctuation by patching the file, then verify the greeting logic passes.
-Report "fixed" if the verification succeeds (exit 0), otherwise report "failed".`,
+Report the verification token from a passing check, or "failed" if it does not pass.`,
     expectedTools: ["read_file", "apply_patch", "run_check"],
-    check: { kind: "regex", pattern: "^[Ff]ixed\\.?$" },
-    fixtureAnswer: "fixed",
+    check: { kind: "exact", expected: "822a5a68" },
+    fixtureAnswer: "822a5a68",
     maxSteps: 10,
   },
 

@@ -18,7 +18,6 @@ export {
   createCsvQueryTool,
   createFlakySumTool,
   createFlakyLookupTool,
-  getToolsV2Schemas,
   type ToolsV2Context,
   type PatchState,
   type ErrorRecoveryState,
