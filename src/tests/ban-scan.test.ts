@@ -145,6 +145,13 @@ describe("ban-scan", () => {
     expect(result.total).toBe(1);
   });
 
+  it("scans .yml and .yaml files", () => {
+    writeFileSync(path.join(tempDir, "ci.yml"), `name: ${SYNTHETIC_TERM}\n`);
+    writeFileSync(path.join(tempDir, "conf.yaml"), `key: ${SYNTHETIC_TERM}\n`);
+    const result = runScan(tempDir, TEST_HASHES, undefined, new Map());
+    expect(result.hits.map((h) => h.path).sort()).toEqual(["ci.yml", "conf.yaml"]);
+  });
+
   it("exitCode is 1 on non-allowed hits and 0 otherwise", () => {
     expect(exitCode({ hits: [{ path: "a", line: 1, allowed: false }], total: 1, allowedCount: 0 })).toBe(1);
     expect(exitCode({ hits: [{ path: "a", line: 1, allowed: true }], total: 1, allowedCount: 1 })).toBe(0);
