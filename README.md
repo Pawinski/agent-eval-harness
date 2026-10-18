@@ -1,11 +1,13 @@
-# basilisk-eval
+# agent-eval-harness
 
-Public Basilisk eval harness (ReAct + MCP + multi-model LLM).
+Public eval harness (ReAct + MCP + multi-model LLM).
 
 Frozen task suite + deterministic checkers. Publish score as **pass/N on suite version**. Re-score after every change. No human grader. No LLM-as-judge for MVP.
 
 > **Published score:** 7/7 on suite 0.1.0 at `4100fbb`, model `nex-agi/nex-n2.5-pro` (paid), one live run, 4,721 prompt / 1,102 completion tokens.
 > Note: `nex-agi/nex-n2.5-pro:free` is no longer listed on OpenRouter (checked 2026-10-17).
+
+Suite 0.1.0 is frozen. It will be retired from main once 0.2.0 lands; reproduce 0.1.0 results at commit e61f639, which 0.1.0 result rows cite.
 
 ## Suite version (single source of truth)
 
