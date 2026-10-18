@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, beforeAll } from "vitest";
+import { existsSync, unlinkSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import {
   createToolsV2Context,
   createToolsV2Options,
@@ -8,6 +10,7 @@ import {
   createCsvQueryTool,
   createFlakySumTool,
   createFlakyLookupTool,
+  checkPermissionModelSupport,
   type ToolsV2Context,
 } from "../mcp/tools-v2.js";
 import { InProcessMcpClient, type McpToolSchema } from "../mcp/client.js";
@@ -777,7 +780,7 @@ describe("patch verification token mechanism (behavior-based)", () => {
     expect(result.content).not.toContain("verification");
   });
 
-  it("infinite-loop patch times out to exit 1", async () => {
+  it("infinite-loop patch times out to exit 1 in under 3s", async () => {
     const ctx = createToolsV2Context();
     const patchTool = createApplyPatchTool(ctx);
     const checkTool = createRunCheckTool(ctx);
@@ -785,12 +788,16 @@ describe("patch verification token mechanism (behavior-based)", () => {
     await patchTool.handler({
       path: "code/buggy.ts",
       old_line: "for (let i = 0; i <= arr.length; i++) {",
-      new_line: "while (true) {",
+      new_line: "while (true) { /* infinite */ }; for (let i = 0; i < arr.length; i++) {",
     });
     
+    const start = Date.now();
     const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+    const elapsed = Date.now() - start;
+    
     expect(result.content).toBe("exit 1");
     expect(result.content).not.toContain("verification");
+    expect(elapsed).toBeLessThan(3000);
   });
 
   it("(d) token is stable across fresh contexts", async () => {
@@ -875,5 +882,241 @@ describe("csv_query filter parsing", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.error).toContain("invalid filter format");
+  });
+});
+
+describe("child process security isolation", () => {
+  const EXPECTED_TOKENS = {
+    sum_array: "86d9c6a6",
+    find_max: "fee3b425",
+    greet: "186712ae",
+  };
+
+  function countChildProcesses(): number {
+    const result = spawnSync("pgrep", ["-c", "-P", String(process.pid)], { encoding: "utf8" });
+    return parseInt(result.stdout.trim() || "0", 10);
+  }
+
+  it("constructor-chain escape attempt fails and host is unaffected", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: "for (let i = 0; i <= arr.length; i++) {",
+      new_line: "arr.constructor.constructor('return globalThis')().__escape_test = 1; for (let i = 0; i < arr.length; i++) {",
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    expect((globalThis as Record<string, unknown>).__escape_test).toBeUndefined();
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("process access escape attempt fails", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: "for (let i = 0; i <= arr.length; i++) {",
+      new_line: "const p = arr.constructor.constructor('return process')(); return p.pid || p.env.HOME;",
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    expect(result.content).not.toContain(String(process.pid));
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("require attempt fails", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: "for (let i = 0; i <= arr.length; i++) {",
+      new_line: "const fs = require('fs'); for (let i = 0; i < arr.length; i++) {",
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("dynamic import attempt fails", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: "for (let i = 0; i <= arr.length; i++) {",
+      new_line: "await import('fs'); for (let i = 0; i < arr.length; i++) {",
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("memory bomb fails", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: "for (let i = 0; i <= arr.length; i++) {",
+      new_line: "const bomb = []; while(true) bomb.push(new Array(1e6)); for (let i = 0; i < arr.length; i++) {",
+    });
+    
+    const start = Date.now();
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+    const elapsed = Date.now() - start;
+    
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    expect(elapsed).toBeLessThan(3000);
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("fork/spawn/Worker attempt fails", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: "for (let i = 0; i <= arr.length; i++) {",
+      new_line: "const cp = require('child_process').spawn('ls'); for (let i = 0; i < arr.length; i++) {",
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("fs read attempt fails", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: "for (let i = 0; i <= arr.length; i++) {",
+      new_line: "const fs = require('fs'); return fs.readFileSync('/etc/passwd', 'utf8');",
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    expect(result.content).not.toContain("root");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("fs write attempt fails and marker file is not created", async () => {
+    const markerPath = "/tmp/escape-marker-test-" + Date.now();
+    const childCountBefore = countChildProcesses();
+    
+    if (existsSync(markerPath)) {
+      unlinkSync(markerPath);
+    }
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: "for (let i = 0; i <= arr.length; i++) {",
+      new_line: `const fs = require('fs'); fs.writeFileSync('${markerPath}', 'escaped'); for (let i = 0; i < arr.length; i++) {`,
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    expect(existsSync(markerPath)).toBe(false);
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("all correctness tokens remain unchanged after security tests", async () => {
+    const patches = [
+      { check: "sum_array", old: "for (let i = 0; i <= arr.length; i++) {", new: "for (let i = 0; i < arr.length; i++) {" },
+      { check: "find_max", old: "if (arr[i] < max) {", new: "if (arr[i] > max) {" },
+      { check: "greet", old: 'return "Hello, " + name + "?";', new: 'return "Hello, " + name + "!";' },
+    ];
+    
+    for (const p of patches) {
+      const ctx = createToolsV2Context();
+      const patchTool = createApplyPatchTool(ctx);
+      const checkTool = createRunCheckTool(ctx);
+      
+      await patchTool.handler({ path: "code/buggy.ts", old_line: p.old, new_line: p.new });
+      const result = await checkTool.handler({ path: "code/buggy.ts", check: p.check });
+      
+      expect(result.content).toContain("exit 0");
+      expect(result.content).toContain(`verification: ${EXPECTED_TOKENS[p.check as keyof typeof EXPECTED_TOKENS]}`);
+    }
+  });
+});
+
+describe("preflight check", () => {
+  it("checkPermissionModelSupport returns ok on supported Node", () => {
+    const result = checkPermissionModelSupport();
+    expect(result.ok).toBe(true);
+  });
+
+  it("preflight detects when permission model is unavailable", () => {
+    const nodeVersion = process.versions.node;
+    const [major] = nodeVersion.split(".").map(Number);
+    
+    if (major < 20) {
+      const result = checkPermissionModelSupport();
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("too old");
+    } else {
+      const result = checkPermissionModelSupport();
+      expect(result.ok).toBe(true);
+    }
   });
 });

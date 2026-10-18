@@ -18,6 +18,8 @@ export {
   createCsvQueryTool,
   createFlakySumTool,
   createFlakyLookupTool,
+  runPreflight,
+  checkPermissionModelSupport,
   type ToolsV2Context,
   type PatchState,
   type ErrorRecoveryState,

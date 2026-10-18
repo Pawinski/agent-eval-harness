@@ -178,6 +178,10 @@ Suite 0.2.0 introduces 6 new tools (11 total): `read_file`, `apply_patch`, `run_
 - **Cost cap**: $35.00
 - **Prompt threshold**: 4,700 tokens
 
+### Node version requirement
+
+Suite 0.2.0 requires **Node >= 20** with permission model support. Patch verification executes model-generated code in a separate permission-restricted Node process with a hard timeout. A preflight check runs at startup and exits with an error if the permission model is unavailable.
+
 ## Env
 
 See `.env.example`:

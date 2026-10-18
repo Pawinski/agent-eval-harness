@@ -7,12 +7,15 @@ import { createHash } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import * as vm from "node:vm";
+import { spawnSync } from "node:child_process";
 import { transpileModule, ModuleKind, ScriptTarget } from "typescript";
 import type { McpToolResult, McpToolSchema, InProcessMcpOptions } from "./client.js";
 import { getDefaultToolDefinitions } from "./client.js";
 
 const VERIFICATION_SALT = "v020-check-7f3a9c";
+const PASS_MARKER = "__CHECK_PASS__";
+const MAX_STDOUT_BYTES = 1024;
+const CHILD_TIMEOUT_MS = 2000;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_ROOT = path.resolve(__dirname, "../../fixtures");
@@ -276,32 +279,110 @@ interface TestCase<T, R> {
   expected: R;
 }
 
-function runBehaviorCheck(
+/**
+ * Check if Node's permission model is available.
+ * Returns { ok: true } if --permission works, { ok: false, message } otherwise.
+ */
+export function checkPermissionModelSupport(): { ok: boolean; message?: string } {
+  const nodeVersion = process.versions.node;
+  const [major] = nodeVersion.split(".").map(Number);
+  
+  if (major < 20) {
+    return { ok: false, message: `Node ${nodeVersion} is too old; permission model requires Node >= 20` };
+  }
+
+  const result = spawnSync(process.execPath, ["--permission", "-e", "console.log('ok')"], {
+    env: {},
+    timeout: 5000,
+    encoding: "utf8",
+  });
+
+  if (result.status !== 0 || !result.stdout?.includes("ok")) {
+    return { ok: false, message: `Node ${nodeVersion} does not support --permission flag` };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Preflight check for 0.2.0: verifies Node permission model is available.
+ * Call this before any model or paid calls.
+ */
+export function runPreflight(): void {
+  const check = checkPermissionModelSupport();
+  if (!check.ok) {
+    console.error(`PREFLIGHT FAILED: ${check.message}`);
+    console.error("Suite 0.2.0 requires Node >= 20 with permission model support.");
+    console.error("Please upgrade Node or use a supported version.");
+    process.exit(1);
+  }
+}
+
+/**
+ * Inline worker script for permission-restricted child process.
+ * Reads JSON from stdin, runs function in sandboxed vm, outputs PASS_MARKER or nothing.
+ */
+const WORKER_SCRIPT = `
+const vm = require("node:vm");
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { input += chunk; });
+process.stdin.on("end", () => {
+  try {
+    const { code, funcName, tests } = JSON.parse(input);
+    const ctx = vm.createContext(Object.create(null), {
+      codeGeneration: { strings: false, wasm: false },
+    });
+    const inputsJson = JSON.stringify(tests.map(t => t.input));
+    const expectedJson = JSON.stringify(tests.map(t => t.expected));
+    const script = new vm.Script(\`
+      (function() {
+        const __inputs = JSON.parse('\${inputsJson.replace(/\\\\/g, "\\\\\\\\").replace(/'/g, "\\\\'")}');
+        const __expected = JSON.parse('\${expectedJson.replace(/\\\\/g, "\\\\\\\\").replace(/'/g, "\\\\'")}');
+        \${code}
+        const __func = \${funcName};
+        if (typeof __func !== "function") return false;
+        for (let __i = 0; __i < __inputs.length; __i++) {
+          try {
+            if (__func(__inputs[__i]) !== __expected[__i]) return false;
+          } catch { return false; }
+        }
+        return true;
+      })();
+    \`);
+    const passed = script.runInContext(ctx, { timeout: 100 });
+    if (passed === true) console.log("${PASS_MARKER}");
+  } catch {}
+});
+`;
+
+/**
+ * Run behavior check in a separate permission-restricted Node process.
+ * Returns true only if the child outputs exactly the PASS_MARKER.
+ */
+function runBehaviorCheckSync(
   jsCode: string,
   funcName: string,
-  testCases: TestCase<unknown, unknown>[],
-  timeoutMs = 100
+  testCases: TestCase<unknown, unknown>[]
 ): boolean {
+  const stdinData = JSON.stringify({ code: jsCode, funcName, tests: testCases });
+  
   try {
-    const context = vm.createContext({});
-    const script = new vm.Script(`${jsCode}\n;${funcName};`);
-    const func = script.runInContext(context, { timeout: timeoutMs }) as (...args: unknown[]) => unknown;
-    
-    if (typeof func !== "function") {
-      return false;
-    }
-    
-    for (const tc of testCases) {
-      try {
-        const result = func(tc.input);
-        if (result !== tc.expected) {
-          return false;
-        }
-      } catch {
-        return false;
+    const result = spawnSync(
+      process.execPath,
+      ["--permission", "--max-old-space-size=64", "-e", WORKER_SCRIPT],
+      {
+        input: stdinData,
+        env: {},
+        timeout: CHILD_TIMEOUT_MS,
+        maxBuffer: MAX_STDOUT_BYTES,
+        stdio: ["pipe", "pipe", "ignore"],
+        killSignal: "SIGKILL",
       }
-    }
-    return true;
+    );
+
+    const stdout = result.stdout?.toString("utf8") ?? "";
+    return result.status === 0 && stdout.trim() === PASS_MARKER;
   } catch {
     return false;
   }
@@ -357,7 +438,7 @@ function runFixtureCheck(content: string, checkName: string, wasPatched: boolean
     return { exitCode: 1, passed: false, message: "check failed" };
   }
   
-  const passed = runBehaviorCheck(jsCode, checkConfig.funcName, checkConfig.tests);
+  const passed = runBehaviorCheckSync(jsCode, checkConfig.funcName, checkConfig.tests);
   if (!passed) {
     return { exitCode: 1, passed: false, message: "check failed" };
   }

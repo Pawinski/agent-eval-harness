@@ -17,6 +17,7 @@ import {
   InProcessMcpClient,
   createToolsV2Context,
   createToolsV2Options,
+  runPreflight,
   type McpToolClient,
 } from "./mcp/index.js";
 import {
@@ -202,6 +203,10 @@ async function main(): Promise<void> {
     console.error(`Unknown suite version: ${suiteVersion}`);
     console.error(`Available suites: 0.1.0, 0.2.0`);
     process.exit(2);
+  }
+
+  if (suiteVersion === "0.2.0") {
+    runPreflight();
   }
 
   const tasks = args.taskId
