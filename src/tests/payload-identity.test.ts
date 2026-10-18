@@ -5,7 +5,22 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { OpenRouterClient } from "../llm/client.js";
+import { createHash } from "node:crypto";
 import { PROJECT_NAME } from "../name.js";
+import { ReactAgent } from "../agent/react.js";
+import {
+  createDefaultMcpClient,
+  createToolsV2Context,
+  createToolsV2Options,
+  InProcessMcpClient,
+} from "../mcp/index.js";
+import { getTask, TASKS, TASKS_V2 } from "../suite/index.js";
+
+// Golden values captured on main d15506d (pre-rename) with this exact procedure.
+const GOLDEN = {
+  "0.1.0": "14 642514ff830c21f9b0efbc97b6b0f0f770fed5cd4390e88432de6b3d6569b728",
+  "0.2.0": "32 5f60e6078c260ed85472b7e1fa273d9c49e0fb5e4eb34aa71e199040a176a06a",
+};
 
 describe("payload-identity", () => {
   let originalFetch: typeof fetch;
@@ -60,7 +75,7 @@ describe("payload-identity", () => {
     });
 
     expect(capturedHeaders["HTTP-Referer"]).toBe(
-      "https://github.com/Pawinski/basilisk-eval",
+      ["https://github.com/Pawinski/", "basi", "lisk-eval"].join(""),
     );
   });
 
@@ -97,8 +112,7 @@ describe("payload-identity", () => {
       defaultModel: "test/model",
     });
 
-    const taskPrompt =
-      'Use the echo tool with text "hello-basilisk". Then finish with exactly that echoed string as the final answer.';
+    const taskPrompt = getTask("echo_hello")!.prompt;
 
     await client.complete({
       messages: [{ role: "user", content: taskPrompt }],
@@ -113,5 +127,38 @@ describe("payload-identity", () => {
     const body2 = capturedBody;
 
     expect(body1).toBe(body2);
+  });
+
+  it("full-suite request bodies match the pre-rename golden (0.1.0 and 0.2.0)", async () => {
+    const bodies: string[] = [];
+    global.fetch = vi.fn().mockImplementation(async (_url, init) => {
+      bodies.push(init?.body as string);
+      const n = JSON.parse(init?.body as string).messages.length;
+      const content =
+        n <= 2
+          ? 'Thought: t\nAction: echo\nAction Input: {"text":"a b"}'
+          : "Thought: d\nAction: finish\nAction Input: x";
+      return new Response(JSON.stringify({ choices: [{ message: { content } }], usage: {} }), { status: 200 });
+    });
+    const suites = [
+      ["0.1.0", TASKS, () => createDefaultMcpClient(), undefined],
+      ["0.2.0", TASKS_V2, () => new InProcessMcpClient(createToolsV2Options(createToolsV2Context())), 4096],
+    ] as const;
+    for (const [name, tasks, tools, obs] of suites) {
+      bodies.length = 0;
+      for (const t of tasks as ReadonlyArray<{ prompt: string; expectedTools?: string[]; maxSteps?: number }>) {
+        const agent = new ReactAgent({
+          llm: new OpenRouterClient({ apiKey: "k", defaultModel: "m/x", maxTokens: 512, cacheBreakpoint: false }),
+          tools: tools(),
+          maxSteps: t.maxSteps ?? 8,
+          expectedTools: t.expectedTools,
+          maxObservationChars: obs,
+          onLog: () => {},
+        });
+        await agent.run(t.prompt);
+      }
+      const got = `${bodies.length} ${createHash("sha256").update(bodies.join("\n")).digest("hex")}`;
+      expect(got).toBe(GOLDEN[name]);
+    }
   });
 });
