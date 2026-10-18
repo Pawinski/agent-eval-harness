@@ -35,6 +35,7 @@ import {
   DEFAULT_SUITE,
   DEFAULT_RUNS,
   SUITE_CONFIGS,
+  SUITE_0_1_0_RETIRED_MSG,
   getDefaultCapUsd,
   getSuiteTasks,
   getCallsPerRun,
@@ -151,7 +152,7 @@ Options:
   --suite, -s     Suite version (default: ${DEFAULT_SUITE})
   --models, -m    Comma-separated model list (default: sorted by worst-case cost)
   --runs, -r      Runs per model (default: ${DEFAULT_RUNS})
-  --cap-usd, -c   Global cost cap in USD (default: $35 for 0.2.0)
+  --cap-usd, -c   Global cost cap in USD (default: $35)
   --credit-usd    Override credit check with fixed value (use if endpoints fail)
   --fixture, -f   Use fixture answers (no LLM, $0 cost, no API key required)
   --help, -h      Show help
@@ -462,7 +463,7 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
     console.error(`Error: Suite "${args.suite}" is not available on this commit.`);
     console.error(`Available suites: ${runnable.join(", ")}`);
     if (args.suite === "0.1.0") {
-      console.error("Suite 0.1.0 was retired from main; reproduce it at commit e61f639 (see README).");
+      console.error(SUITE_0_1_0_RETIRED_MSG);
     }
     return 1;
   }

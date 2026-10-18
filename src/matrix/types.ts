@@ -121,6 +121,8 @@ export const DEFAULT_MODELS = [
 export const DEFAULT_SUITE = "0.2.0";
 export const DEFAULT_RUNS = 3;
 
+export const SUITE_0_1_0_RETIRED_MSG = "Suite 0.1.0 was retired from main; reproduce it at commit e61f639 (see README).";
+
 export function getDefaultMaxInputTokens(maxSteps: number): number {
   if (maxSteps === 12) {
     return 4700;

@@ -52,3 +52,64 @@ describe("run.ts CLI RETRY_DELAYS_MS check", () => {
     expect(r.status).toBe(0);
   }, 60_000);
 });
+
+function runEvalCli(extra: string[] = []) {
+  return spawnSync(process.execPath, ["--import", "tsx", "--import", pathToFileURL(trap).href, "src/run.ts", ...extra], {
+    cwd: ROOT,
+    encoding: "utf8",
+    timeout: 60_000,
+    env: {
+      ...process.env,
+      OPENROUTER_API_KEY: "test-key-not-real",
+      OPENROUTER_BASE_URL: "http://127.0.0.1:9/api/v1",
+      MODEL: "m/x",
+    },
+  });
+}
+
+function runMatrixCli(extra: string[] = []) {
+  return spawnSync(process.execPath, ["--import", "tsx", "--import", pathToFileURL(trap).href, "src/matrix.ts", ...extra], {
+    cwd: ROOT,
+    encoding: "utf8",
+    timeout: 60_000,
+    env: {
+      ...process.env,
+      OPENROUTER_API_KEY: "test-key-not-real",
+      OPENROUTER_BASE_URL: "http://127.0.0.1:9/api/v1",
+    },
+  });
+}
+
+const E61F639_MSG = "Suite 0.1.0 was retired from main; reproduce it at commit e61f639 (see README).";
+
+describe("run.ts CLI --suite 0.1.0 rejection", () => {
+  it("--suite 0.1.0 exits 1 with e61f639 pointer and no network call", () => {
+    const r = runEvalCli(["--suite", "0.1.0"]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(E61F639_MSG);
+    expect(r.stderr).not.toContain("NETWORK_CALL");
+  }, 60_000);
+
+  it("--suite 0.1.0 --fixture exits 1 with e61f639 pointer and no network call", () => {
+    const r = runEvalCli(["--suite", "0.1.0", "--fixture"]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(E61F639_MSG);
+    expect(r.stderr).not.toContain("NETWORK_CALL");
+  }, 60_000);
+});
+
+describe("matrix CLI --suite 0.1.0 rejection", () => {
+  it("--suite 0.1.0 exits 1 with e61f639 pointer and no network call", () => {
+    const r = runMatrixCli(["--suite", "0.1.0"]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(E61F639_MSG);
+    expect(r.stderr).not.toContain("NETWORK_CALL");
+  }, 60_000);
+
+  it("--suite 0.1.0 --fixture exits 1 with e61f639 pointer and no network call", () => {
+    const r = runMatrixCli(["--suite", "0.1.0", "--fixture"]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(E61F639_MSG);
+    expect(r.stderr).not.toContain("NETWORK_CALL");
+  }, 60_000);
+});

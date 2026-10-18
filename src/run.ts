@@ -29,6 +29,7 @@ import {
   TASKS_V2,
   type SuiteTask,
 } from "./suite/index.js";
+import { SUITE_0_1_0_RETIRED_MSG } from "./matrix/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -201,9 +202,12 @@ async function main(): Promise<void> {
   try {
     allTasks = getSuiteTasksList(suiteVersion);
   } catch {
-    console.error(`Unknown suite version: ${suiteVersion}`);
+    console.error(`Error: Suite "${suiteVersion}" is not available on this commit.`);
     console.error(`Available suites: 0.2.0`);
-    process.exit(2);
+    if (suiteVersion === "0.1.0") {
+      console.error(SUITE_0_1_0_RETIRED_MSG);
+    }
+    process.exit(1);
   }
 
   if (suiteVersion === "0.2.0") {
