@@ -73,7 +73,7 @@ describe("g gate: real matrix with scripted fetch", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const models = ["a/a", "b/b", "c/c", "d/d"];
     const code = await runMain({
-      argv: ["--suite", "0.1.0", "--models", models.join(","), "--runs", "2", "--credit-usd", "100", "--cap-usd", "50"],
+      argv: ["--suite", "0.2.0", "--models", models.join(","), "--runs", "2", "--credit-usd", "100", "--cap-usd", "50"],
       env: process.env,
       getGitStatus: () => ({ sha: "0".repeat(40), isDirty: false }),
       skipPricesFetch: true,
@@ -87,7 +87,7 @@ describe("g gate: real matrix with scripted fetch", () => {
     expect(code).toBe(0);
 
     const files = [...written.keys()];
-    const scored = (m: string) => files.filter((f) => new RegExp(`[\\\\/]0\\.1\\.0[\\\\/][0-9a-f]{7}-${m}-run\\d\\.json$`).test(f));
+    const scored = (m: string) => files.filter((f) => new RegExp(`[\\\\/]0\\.2\\.0[\\\\/][0-9a-f]{7}-${m}-run\\d\\.json$`).test(f));
     const meta = (m: string) => files.filter((f) => new RegExp(`_meta[\\\\/][0-9a-f]{7}-${m}-run\\d\\.json$`).test(f)).map((f) => JSON.parse(written.get(f)!));
     expect(scored("a__a")).toEqual([]);
     expect(scored("b__b")).toEqual([]);
@@ -112,8 +112,8 @@ describe("g gate: real matrix with scripted fetch", () => {
       // Not Empty either: an aborted task is not an empty answer.
       expect(out).toContain("| a/a | 1 | not scored (rate_limited) | 0 | 0 | - | $0.000000 | - | rate_limited | - |");
       expect(out).toContain("| b/b | 1 | not scored (http_errors) |");
-      expect(out).toMatch(/\| c\/c \| 1 \| 0\/7 \|.*\| - \| yes \|/);
-      expect(out).toMatch(/\| d\/d \| 1 \| 0\/7 \|.*\| - \| no \|/);
+      expect(out).toMatch(/\| c\/c \| 1 \| 0\/16 \|.*\| - \| yes \|/);
+      expect(out).toMatch(/\| d\/d \| 1 \| 0\/16 \|.*\| - \| no \|/);
       expect(out).toMatch(/\| a\/a \| - \| - \| - \|/);
     }
     const skipped = lines.find((l) => l.includes("(skipped: rate_limited)"));
@@ -124,11 +124,11 @@ describe("g gate: real matrix with scripted fetch", () => {
     vi.stubGlobal("fetch", vi.fn(async () => ok()));
     const models = ["a/a", "b/b"];
     await runMatrix(
-      { suite: "0.1.0", models, runs: 2, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models, runs: 2, capUsd: 100, fixture: false },
       { fetchedAt: "t", models: new Map(models.map((m) => [m, tiny(m)])) },
       { skipFileWrites: true },
     );
-    const n = models.length * 2 * getSuiteTasks("0.1.0").length;
+    const n = models.length * 2 * getSuiteTasks("0.2.0").length;
     expect(created.length).toBe(n);
     expect(new Set(created).size).toBe(n);
   });
@@ -156,7 +156,7 @@ describe("g gate: real matrix with scripted fetch", () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
     const code = await runMain({
-      argv: ["--suite", "0.1.0", "--models", "a/a", "--runs", "1", "--credit-usd", "1"],
+      argv: ["--suite", "0.2.0", "--models", "a/a", "--runs", "1", "--credit-usd", "1"],
       env: { OPENROUTER_API_KEY: "test-key-not-real", OPENROUTER_BASE_URL: "http://mock.invalid/custom/v1/" },
       getGitStatus: () => ({ sha: "0".repeat(40), isDirty: false }),
       skipFileWrites: true,
@@ -180,7 +180,7 @@ describe("g gate: real matrix with scripted fetch", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const models = ["nex-agi/nex", "openai/4o-mini"];
     const code = await runMain({
-      argv: ["--suite", "0.1.0", "--models", models.join(","), "--runs", "1", "--credit-usd", "100", "--cap-usd", "50"],
+      argv: ["--suite", "0.2.0", "--models", models.join(","), "--runs", "1", "--credit-usd", "100", "--cap-usd", "50"],
       env: process.env,
       getGitStatus: () => ({ sha: "0".repeat(40), isDirty: false }),
       skipPricesFetch: true,
@@ -224,7 +224,7 @@ describe("g gate: real matrix with scripted fetch", () => {
     vi.stubGlobal("fetch", vi.fn(async () => ok()));
     const models = ["a/a", "b/b"];
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models, runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models, runs: 1, capUsd: 100, fixture: false },
       {
         fetchedAt: "t",
         models: new Map(models.map((m) => [m, tiny(m)])),
@@ -237,12 +237,72 @@ describe("g gate: real matrix with scripted fetch", () => {
     expect(runs[1].temperatureSent).toBe(false);
   });
 
+  it("per-model summary shows 'mixed' Temp sent in output when model has both true and false", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ok()));
+    const lines: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => { lines.push(a.join(" ")); });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    let runN = 0;
+    const code = await runMain({
+      argv: ["--suite", "0.2.0", "--models", "a/a", "--runs", "2", "--credit-usd", "100", "--cap-usd", "50"],
+      env: process.env,
+      getGitStatus: () => ({ sha: "0".repeat(40), isDirty: false }),
+      skipPricesFetch: true,
+      priceData: {
+        fetchedAt: "t",
+        models: new Map([["a/a", tiny("a/a")]]),
+        supportedParameters: new Map(),
+        parametersFetched: false,
+      } as never,
+      skipFileWrites: true,
+      llmClientFactory: (model: string) => {
+        runN++;
+        const tempSent = runN <= 16;
+        return {
+          async complete(): Promise<import("../llm/index.js").LlmCompletionResponse> {
+            return {
+              content: "Thought: d\nAction: finish\nAction Input: hello",
+              model,
+              usage: { promptTokens: 1, completionTokens: 1 },
+              _meta: { temperatureSent: tempSent },
+            };
+          },
+        };
+      },
+    });
+    expect(code).toBe(0);
+    const perModelLine = lines.find((l) => l.startsWith("| a/a |") && l.includes(" | mixed |"));
+    expect(perModelLine).toBeDefined();
+  });
+
+  it("rate_limited skip does not produce duplicate 'Model aborted' line", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("rl", { status: 429 })));
+    const lines: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => { lines.push(a.join(" ")); });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await runMain({
+      argv: ["--suite", "0.2.0", "--models", "a/a,b/b", "--runs", "1", "--credit-usd", "100", "--cap-usd", "50"],
+      env: process.env,
+      getGitStatus: () => ({ sha: "0".repeat(40), isDirty: false }),
+      skipPricesFetch: true,
+      priceData: {
+        fetchedAt: "t",
+        models: new Map([["a/a", tiny("a/a")], ["b/b", tiny("b/b")]]),
+      } as never,
+      skipFileWrites: true,
+    });
+    const modelAbortedLines = lines.filter((l) => l.includes("Model aborted:"));
+    const skippedRateLimitedLines = lines.filter((l) => l.includes("Skipped (rate_limited):"));
+    expect(skippedRateLimitedLines.length).toBeGreaterThan(0);
+    expect(modelAbortedLines.length).toBe(0);
+  });
+
   it("invalid RETRY_DELAYS_MS (empty piece) exits 1 with clear error naming the variable", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     const errors: string[] = [];
     vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => { errors.push(a.join(" ")); });
     const code = await runMain({
-      argv: ["--suite", "0.1.0", "--models", "a/a", "--runs", "1", "--credit-usd", "1"],
+      argv: ["--suite", "0.2.0", "--models", "a/a", "--runs", "1", "--credit-usd", "1"],
       env: { OPENROUTER_API_KEY: "test-key-not-real", RETRY_DELAYS_MS: "1,,2" },
       getGitStatus: () => ({ sha: "0".repeat(40), isDirty: false }),
       skipPricesFetch: true,
@@ -258,7 +318,7 @@ describe("g gate: real matrix with scripted fetch", () => {
     const errors: string[] = [];
     vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => { errors.push(a.join(" ")); });
     const code = await runMain({
-      argv: ["--suite", "0.1.0", "--models", "a/a", "--runs", "1", "--credit-usd", "1"],
+      argv: ["--suite", "0.2.0", "--models", "a/a", "--runs", "1", "--credit-usd", "1"],
       env: { OPENROUTER_API_KEY: "test-key-not-real", RETRY_DELAYS_MS: "abc,def" },
       getGitStatus: () => ({ sha: "0".repeat(40), isDirty: false }),
       skipPricesFetch: true,
@@ -274,7 +334,7 @@ describe("g gate: real matrix with scripted fetch", () => {
     const errors: string[] = [];
     vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => { errors.push(a.join(" ")); });
     const code = await runMain({
-      argv: ["--suite", "0.1.0", "--models", "a/a", "--runs", "1", "--credit-usd", "1"],
+      argv: ["--suite", "0.2.0", "--models", "a/a", "--runs", "1", "--credit-usd", "1"],
       env: { OPENROUTER_API_KEY: "test-key-not-real", RETRY_DELAYS_MS: "1000,-500,2000" },
       getGitStatus: () => ({ sha: "0".repeat(40), isDirty: false }),
       skipPricesFetch: true,
@@ -283,5 +343,62 @@ describe("g gate: real matrix with scripted fetch", () => {
     });
     expect(code).toBe(1);
     expect(errors.some((e) => e.includes("RETRY_DELAYS_MS") && e.includes("invalid"))).toBe(true);
+  });
+
+  it("invalid RETRY_DELAYS_MS (zero) exits 1 with no network calls", async () => {
+    let networkCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => { networkCalls++; return ok(); }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const errors: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => { errors.push(a.join(" ")); });
+    const code = await runMain({
+      argv: ["--suite", "0.2.0", "--models", "a/a", "--runs", "1", "--credit-usd", "1"],
+      env: { OPENROUTER_API_KEY: "test-key-not-real", RETRY_DELAYS_MS: "0" },
+      getGitStatus: () => ({ sha: "0".repeat(40), isDirty: false }),
+      skipPricesFetch: true,
+      priceData: { fetchedAt: "t", models: new Map([["a/a", tiny("a/a")]]) } as never,
+      skipFileWrites: true,
+    });
+    expect(code).toBe(1);
+    expect(errors.some((e) => e.includes("RETRY_DELAYS_MS") && e.includes("invalid"))).toBe(true);
+    expect(networkCalls).toBe(0);
+  });
+
+  it("invalid RETRY_DELAYS_MS (decimal) exits 1 with no network calls", async () => {
+    let networkCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => { networkCalls++; return ok(); }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const errors: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => { errors.push(a.join(" ")); });
+    const code = await runMain({
+      argv: ["--suite", "0.2.0", "--models", "a/a", "--runs", "1", "--credit-usd", "1"],
+      env: { OPENROUTER_API_KEY: "test-key-not-real", RETRY_DELAYS_MS: "1.5" },
+      getGitStatus: () => ({ sha: "0".repeat(40), isDirty: false }),
+      skipPricesFetch: true,
+      priceData: { fetchedAt: "t", models: new Map([["a/a", tiny("a/a")]]) } as never,
+      skipFileWrites: true,
+    });
+    expect(code).toBe(1);
+    expect(errors.some((e) => e.includes("RETRY_DELAYS_MS") && e.includes("invalid"))).toBe(true);
+    expect(networkCalls).toBe(0);
+  });
+
+  it("invalid RETRY_DELAYS_MS (scientific notation) exits 1 with no network calls", async () => {
+    let networkCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => { networkCalls++; return ok(); }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const errors: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => { errors.push(a.join(" ")); });
+    const code = await runMain({
+      argv: ["--suite", "0.2.0", "--models", "a/a", "--runs", "1", "--credit-usd", "1"],
+      env: { OPENROUTER_API_KEY: "test-key-not-real", RETRY_DELAYS_MS: "1e3" },
+      getGitStatus: () => ({ sha: "0".repeat(40), isDirty: false }),
+      skipPricesFetch: true,
+      priceData: { fetchedAt: "t", models: new Map([["a/a", tiny("a/a")]]) } as never,
+      skipFileWrites: true,
+    });
+    expect(code).toBe(1);
+    expect(errors.some((e) => e.includes("RETRY_DELAYS_MS") && e.includes("invalid"))).toBe(true);
+    expect(networkCalls).toBe(0);
   });
 });

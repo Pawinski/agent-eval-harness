@@ -56,6 +56,7 @@ export {
   DEFAULT_SUITE,
   DEFAULT_RUNS,
   DEFAULT_CAP_USD,
+  SUITE_0_1_0_RETIRED_MSG,
   getDefaultCapUsd,
   getDefaultIMax,
   getDefaultMaxInputTokens,

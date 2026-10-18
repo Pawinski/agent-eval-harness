@@ -142,17 +142,13 @@ describe("abort rules", () => {
 });
 
 describe("suite tasks", () => {
-  it("getSuiteTasks returns tasks for 0.1.0", () => {
-    const tasks = getSuiteTasks("0.1.0");
-    expect(tasks.length).toBe(7);
+  it("getSuiteTasks returns tasks for 0.2.0", () => {
+    const tasks = getSuiteTasks("0.2.0");
+    expect(tasks.length).toBe(16);
   });
 
   it("getSuiteTasks throws for unknown suite", () => {
     expect(() => getSuiteTasks("unknown")).toThrow("Unknown suite version");
-  });
-
-  it("getDefaultIMax returns 3000 for 0.1.0", () => {
-    expect(getDefaultIMax("0.1.0", 8)).toBe(3000);
   });
 
   it("getDefaultIMax returns 4700 for maxSteps 12", () => {
@@ -1032,7 +1028,7 @@ describe("1. Empty responses end-to-end", () => {
     const { factory } = createEmptyLlmFactory();
 
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["test/empty-model"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["test/empty-model"], runs: 1, capUsd: 100, fixture: false },
       zeroPriceData,
       { llmClientFactory: factory, skipFileWrites: true },
     );
@@ -1049,7 +1045,7 @@ describe("1. Empty responses end-to-end", () => {
     const { factory } = createEmptyLlmFactory();
 
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["test/empty-model"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["test/empty-model"], runs: 1, capUsd: 100, fixture: false },
       zeroPriceData,
       { llmClientFactory: factory, skipFileWrites: true },
     );
@@ -1063,14 +1059,14 @@ describe("1. Empty responses end-to-end", () => {
     const { factory } = createEmptyLlmFactory();
 
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["test/empty-model"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["test/empty-model"], runs: 1, capUsd: 100, fixture: false },
       zeroPriceData,
       { llmClientFactory: factory, skipFileWrites: true },
     );
 
     const run = runs[0];
     expect(run.emptyCount).toBe(run.emptyTasks.length);
-    expect(run.emptyCount).toBeLessThanOrEqual(7);
+    expect(run.emptyCount).toBeLessThanOrEqual(16);
     expect(run.emptyCount).toBeGreaterThan(0);
   });
 
@@ -1088,7 +1084,7 @@ describe("1. Empty responses end-to-end", () => {
     });
 
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["test/empty-model"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["test/empty-model"], runs: 1, capUsd: 100, fixture: false },
       zeroPriceData,
       { llmClientFactory: factory, skipFileWrites: true },
     );
@@ -1105,7 +1101,7 @@ describe("1. Empty responses end-to-end", () => {
     });
 
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["test/empty-model"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["test/empty-model"], runs: 1, capUsd: 100, fixture: false },
       zeroPriceData,
       { llmClientFactory: httpErrorFactory, skipFileWrites: true },
     );
@@ -1208,7 +1204,7 @@ describe("3. max_tokens enforcement", () => {
     };
 
     await runMatrix(
-      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
       priceData,
       { llmClientFactory: trackingFactory, skipFileWrites: true },
     );
@@ -1245,7 +1241,7 @@ describe("4. Fixture output directory", () => {
     const priceData = createFixturePrices(["test/model"]);
 
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: true },
+      { suite: "0.2.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: true },
       priceData,
       { skipFileWrites: true },
     );
@@ -1339,7 +1335,7 @@ describe("6. HTTP error recording", () => {
     };
 
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
       priceData,
       { llmClientFactory: http429Factory, skipFileWrites: true },
     );
@@ -1361,13 +1357,13 @@ describe("6. HTTP error recording", () => {
     };
 
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
       priceData,
       { llmClientFactory: http429OnFirstFactory, skipFileWrites: true },
     );
 
     const run = runs[0];
-    const task0Calls = run.calls.filter((c) => c.taskId === "echo_hello");
+    const task0Calls = run.calls.filter((c) => c.taskId === "chain_json_regex_add");
     expect(task0Calls.length).toBe(1);
     expect(task0Calls[0].httpError).toBe(true);
     expect(task0Calls[0].httpStatus).toBe(429);
@@ -1396,7 +1392,7 @@ describe("6. HTTP error recording", () => {
     };
 
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
       priceData,
       { llmClientFactory: failOnThirdFactory, skipFileWrites: true },
     );
@@ -1430,7 +1426,7 @@ describe("6. HTTP error recording", () => {
     };
 
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
       priceData,
       { llmClientFactory: http500Factory, skipFileWrites: true },
     );
@@ -1453,7 +1449,7 @@ describe("6. HTTP error recording", () => {
     };
 
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["test/model"], runs: 1, capUsd: 100, fixture: false },
       priceData,
       { llmClientFactory: errorFactory, skipFileWrites: true },
     );
@@ -1541,7 +1537,7 @@ describe("7. Credit pre-flight", () => {
     const { factory, getCallsPerModel } = createTrackingFactory();
 
     const { skippedModels, creditTopUp } = await runMatrix(
-      { suite: "0.1.0", models: ["expensive/model", "cheap/model"], runs: 1, capUsd: 10000, fixture: false },
+      { suite: "0.2.0", models: ["expensive/model", "cheap/model"], runs: 1, capUsd: 10000, fixture: false },
       testPriceData,
       {
         llmClientFactory: factory,
@@ -1563,7 +1559,7 @@ describe("7. Credit pre-flight", () => {
     const { factory, getCallsPerModel } = createTrackingFactory();
 
     const { skippedModels } = await runMatrix(
-      { suite: "0.1.0", models: ["expensive/model", "cheap/model"], runs: 1, capUsd: 10000, fixture: false },
+      { suite: "0.2.0", models: ["expensive/model", "cheap/model"], runs: 1, capUsd: 10000, fixture: false },
       testPriceData,
       {
         llmClientFactory: factory,
@@ -1582,7 +1578,7 @@ describe("7. Credit pre-flight", () => {
     const { factory } = createTrackingFactory();
 
     const { skippedModels, creditTopUp } = await runMatrix(
-      { suite: "0.1.0", models: ["expensive/model", "cheap/model"], runs: 1, capUsd: 10000, fixture: false },
+      { suite: "0.2.0", models: ["expensive/model", "cheap/model"], runs: 1, capUsd: 10000, fixture: false },
       testPriceData,
       {
         llmClientFactory: factory,
@@ -1740,7 +1736,7 @@ describe("7. Credit pre-flight", () => {
     const { factory } = createTrackingFactory();
 
     const { skippedModels } = await runMatrix(
-      { suite: "0.1.0", models: ["expensive/model"], runs: 1, capUsd: 0.001, fixture: false },
+      { suite: "0.2.0", models: ["expensive/model"], runs: 1, capUsd: 0.001, fixture: false },
       testPriceData,
       {
         llmClientFactory: factory,
@@ -1851,7 +1847,7 @@ describe("7. Credit pre-flight", () => {
     };
 
     const { runs, skippedModels } = await runMatrix(
-      { suite: "0.1.0", models: ["medium/model", "expensive/model"], runs: 3, capUsd: 1000, fixture: false },
+      { suite: "0.2.0", models: ["medium/model", "expensive/model"], runs: 3, capUsd: 1000, fixture: false },
       testData,
       {
         llmClientFactory: trackingFactory,
@@ -1885,7 +1881,7 @@ describe("7. Credit pre-flight", () => {
     };
 
     const { skippedModels, creditTopUp } = await runMatrix(
-      { suite: "0.1.0", models: ["model1", "model2"], runs: 1, capUsd: 1000, fixture: false },
+      { suite: "0.2.0", models: ["model1", "model2"], runs: 1, capUsd: 1000, fixture: false },
       testData,
       {
         llmClientFactory: () => ({
@@ -1916,7 +1912,7 @@ describe("7. Credit pre-flight", () => {
     };
 
     const { skippedModels, capShortfall } = await runMatrix(
-      { suite: "0.1.0", models: ["cheap/model"], runs: 1, capUsd: 0.001, fixture: false },
+      { suite: "0.2.0", models: ["cheap/model"], runs: 1, capUsd: 0.001, fixture: false },
       testData,
       {
         llmClientFactory: () => ({
@@ -1936,7 +1932,7 @@ describe("7. Credit pre-flight", () => {
 
   it("labels skipped: credit when credit binds", async () => {
     const { skippedModels, creditTopUp } = await runMatrix(
-      { suite: "0.1.0", models: ["cheap/model"], runs: 1, capUsd: 1000, fixture: false },
+      { suite: "0.2.0", models: ["cheap/model"], runs: 1, capUsd: 1000, fixture: false },
       testPriceData,
       {
         llmClientFactory: () => ({

@@ -9,16 +9,14 @@ import { createHash } from "node:crypto";
 import { PROJECT_NAME } from "../name.js";
 import { ReactAgent } from "../agent/react.js";
 import {
-  createDefaultMcpClient,
   createToolsV2Context,
   createToolsV2Options,
   InProcessMcpClient,
 } from "../mcp/index.js";
-import { getTask, TASKS, TASKS_V2 } from "../suite/index.js";
+import { getTaskV2, TASKS_V2 } from "../suite/index.js";
 
 // Golden values captured on main d15506d (pre-rename) with this exact procedure.
 const GOLDEN = {
-  "0.1.0": "14 642514ff830c21f9b0efbc97b6b0f0f770fed5cd4390e88432de6b3d6569b728",
   "0.2.0": "32 5f60e6078c260ed85472b7e1fa273d9c49e0fb5e4eb34aa71e199040a176a06a",
 };
 
@@ -113,7 +111,7 @@ describe("payload-identity", () => {
       defaultModel: "test/model",
     });
 
-    const taskPrompt = getTask("echo_hello")!.prompt;
+    const taskPrompt = getTaskV2("chain_json_regex_add")!.prompt;
 
     await client.complete({
       messages: [{ role: "user", content: taskPrompt }],
@@ -130,7 +128,7 @@ describe("payload-identity", () => {
     expect(body1).toBe(body2);
   });
 
-  it("full-suite request bodies match the pre-rename golden (0.1.0 and 0.2.0)", async () => {
+  it("full-suite request bodies match the pre-rename golden (0.2.0)", async () => {
     // Build the client exactly as `npm run eval` does: library defaults, no env overrides.
     for (const k of ["MAX_TOKENS", "AGENT_EVAL_CACHE_BREAKPOINT", ["BASI", "LISK_CACHE_BREAKPOINT"].join("")]) {
       vi.stubEnv(k, undefined as unknown as string);
@@ -146,7 +144,6 @@ describe("payload-identity", () => {
       return new Response(JSON.stringify({ choices: [{ message: { content } }], usage: {} }), { status: 200 });
     });
     const suites = [
-      ["0.1.0", TASKS, () => createDefaultMcpClient(), undefined],
       ["0.2.0", TASKS_V2, () => new InProcessMcpClient(createToolsV2Options(createToolsV2Context())), 4096],
     ] as const;
     for (const [name, tasks, tools, obs] of suites) {

@@ -1,4 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { printSummaryToConsole } from "../matrix.js";
+import { getSuiteTasks, SUITE_CONFIGS, type RunResult } from "../matrix/types.js";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -69,6 +71,40 @@ describe("results schema validation", () => {
 
   it("should have at least one result file", () => {
     expect(jsonFiles.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("results/0.1.0 result files render with tasks.ts gone", () => {
+    // The 0.1.0 suite source is gone from this commit...
+    expect(() => getSuiteTasks("0.1.0")).toThrow();
+    const suiteDir = path.join(RESULTS_DIR, "0.1.0");
+    const rows = readdirSync(suiteDir)
+      .filter((e) => e.endsWith(".json") && !e.startsWith("_"))
+      .map((e) => JSON.parse(readFileSync(path.join(suiteDir, e), "utf8")) as ResultRow);
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    const runs: RunResult[] = rows.map((r) => ({
+      model: r.model, runN: r.run_n, pass: r.pass, total: r.total,
+      tokensIn: r.tokens_in, tokensOut: r.tokens_out, tokensCached: r.tokens_cached, costUsd: r.cost_usd,
+      emptyTasks: [], emptyCount: 0, calls: [], retries: 0, parametersFetched: null,
+    }));
+    // ...yet the stored rows still render through the matrix summary.
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => { lines.push(a.join(" ")); });
+    try {
+      printSummaryToConsole(runs, "0.1.0", SUITE_CONFIGS["0.1.0"].defaultCapUsd, SUITE_CONFIGS["0.1.0"].taskCount);
+    } finally {
+      spy.mockRestore();
+    }
+    const out = lines.join("\n");
+    expect(out).toContain("Suite: 0.1.0 | Cap: $10.00 | Tasks: 7");
+    for (const r of rows) {
+      expect(r.suite).toBe("0.1.0");
+      expect(out).toContain(`| ${r.model} | ${r.run_n} | ${r.pass}/${r.total} |`);
+    }
+    const perModel = lines.slice(lines.findIndex((l) => l.includes("Per-Model Summary")));
+    for (const model of new Set(rows.map((r) => r.model))) {
+      const passes = rows.filter((r) => r.model === model).sort((a, b) => a.run_n - b.run_n).map((r) => `${r.pass}/7`).join(", ");
+      expect(perModel.some((l) => l.startsWith(`| ${model} | ${passes} |`))).toBe(true);
+    }
   });
 
   for (const filePath of jsonFiles) {

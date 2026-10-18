@@ -7,7 +7,7 @@ Frozen task suite + deterministic checkers. Publish score as **pass/N on suite v
 > **Published score:** 7/7 on suite 0.1.0 at `4100fbb`, model `nex-agi/nex-n2.5-pro` (paid), one live run, 4,721 prompt / 1,102 completion tokens.
 > Note: `nex-agi/nex-n2.5-pro:free` is no longer listed on OpenRouter (checked 2026-10-17).
 
-Suite 0.1.0 is frozen. It will be retired from main once 0.2.0 lands; reproduce 0.1.0 results at commit e61f639, which 0.1.0 result rows cite.
+**Suite 0.2.0** is now the default. Suite 0.1.0 source was retired from main; reproduce 0.1.0 at commit e61f639 (see below).
 
 ## Suite version (single source of truth)
 
@@ -66,7 +66,7 @@ npm run eval
 **Single task:**
 
 ```bash
-npm run eval -- --task echo_hello
+npm run eval -- --task chain_json_regex_add
 ```
 
 **Typecheck:**
@@ -79,16 +79,10 @@ npm run typecheck
 
 The matrix runner evaluates multiple models across multiple runs with cost caps.
 
-**Basic usage (suite 0.1.0):**
+**Basic usage:**
 
 ```bash
 OPENROUTER_API_KEY=... npm run matrix
-```
-
-**Suite 0.2.0:**
-
-```bash
-OPENROUTER_API_KEY=... npm run matrix -- --suite 0.2.0
 ```
 
 **Override models, runs, and cap:**
@@ -105,10 +99,10 @@ npm run matrix -- --fixture
 
 ### Defaults
 
-- **Suite**: 0.1.0
+- **Suite**: 0.2.0
 - **Runs**: 3 per model
 - **Models**: nex-agi/nex-n2.5-pro, openai/gpt-4o-mini, anthropic/claude-haiku-5.5, mistralai/mistral-large-2512, openai/gpt-6.1-sol, anthropic/claude-opus-5.5 (sorted by worst-case cost)
-- **Cap**: $10.00 for 0.1.0, $35.00 for 0.2.0
+- **Cap**: $35.00
 
 ### Credit Pre-flight
 
@@ -133,17 +127,15 @@ If both credit endpoints fail, OR if `/credits` fails AND `/key` reports null li
 
 Results are written to `results/<suite>/` with per-run JSON files and a summary. The runner prints the exact file paths at the end. Skipped models with their status (skipped: credit or skipped: cap) are shown in the summary tables.
 
-## Task IDs (suite 0.1.0)
+## Suite 0.1.0 (archived)
 
-| ID | Check |
-|----|--------|
-| `echo_hello` | exact |
-| `add_17_25` | exact |
-| `json_get_city` | exact |
-| `regex_ticket` | regex |
-| `word_count_phrase` | exact |
-| `json_equal_payload` | json_equal |
-| `contains_basilisk` | contains |
+Suite 0.1.0 source is retired from main. The `results/0.1.0/e61f639-*` rows came from the live matrix at commit e61f639. To reproduce them:
+
+```bash
+git checkout e61f639 && npm ci && OPENROUTER_API_KEY=... npm run matrix -- --suite 0.1.0
+```
+
+Offline check at the same commit (no key, $0): `npm run matrix -- --suite 0.1.0 --fixture` (7/7 per run).
 
 ## Suite 0.2.0
 
@@ -158,13 +150,11 @@ Suite 0.2.0 expands coverage to 16 tasks across 6 categories:
 | `data` | 2 | CSV filtering and aggregation |
 | `error_recovery` | 2 | Retry after transient errors |
 
-### Using the `--suite` flag
-
-Run eval or matrix against a specific suite version:
+### Running suite 0.2.0
 
 ```bash
-npm run eval -- --suite 0.2.0 --fixture
-npm run matrix -- --suite 0.2.0 --fixture
+npm run eval -- --fixture
+npm run matrix -- --fixture
 ```
 
 Suite 0.2.0 introduces 6 new tools (11 total): `read_file`, `apply_patch`, `run_check`, `csv_query`, `flaky_sum`, `flaky_lookup`. Chain and selection tasks see the full 11-tool catalog; other tasks see only their listed subset (via `expectedTools`).

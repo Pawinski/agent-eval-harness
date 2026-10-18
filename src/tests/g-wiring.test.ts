@@ -48,14 +48,14 @@ describe("g production wiring", () => {
     vi.stubGlobal("fetch", vi.fn(async () => (++chat <= 2 ? new Response("rl", { status: 429 }) : okJson())));
     const spy = vi.spyOn(MatrixLlmClient.prototype, "checkBudget");
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
       priceFor(["m/x"]),
       { skipFileWrites: true },
     );
-    expect(chat).toBe(7 + 2); // 7 tasks x 1 call, plus 2 x 429
+    expect(chat).toBe(16 + 2); // 16 tasks x 1 call, plus 2 x 429
     expect(runs[0].retries).toBe(2);
-    // one check before each of the 7 calls + one before each of the 2 retries
-    expect(spy).toHaveBeenCalledTimes(7 + 2);
+    // one check before each of the 16 calls + one before each of the 2 retries
+    expect(spy).toHaveBeenCalledTimes(16 + 2);
   });
 
   it("a budget check that fails before a retry stops the retry", async () => {
@@ -67,7 +67,7 @@ describe("g production wiring", () => {
       if (++n === 2) throw new MatrixAbort("global_cap", "cap");
     });
     const res = await runMatrix(
-      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
       priceFor(["m/x"]),
       { skipFileWrites: true },
     );
@@ -80,7 +80,7 @@ describe("g production wiring", () => {
     const bodies: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (_u: string, init: RequestInit) => { bodies.push(String(init.body)); return okJson(); }));
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
       priceFor(["m/x"], { supportedParameters: new Map([["m/x", new Set(["max_tokens"])]]), parametersFetched: true }) as never,
       { skipFileWrites: true },
     );
@@ -95,7 +95,7 @@ describe("g production wiring", () => {
     const bodies: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (_u: string, init: RequestInit) => { bodies.push(String(init.body)); return okJson(); }));
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
       priceFor(["m/x"]),
       { skipFileWrites: true },
     );
@@ -108,7 +108,7 @@ describe("g production wiring", () => {
     vi.stubGlobal("fetch", vi.fn(async () =>
       new Response(JSON.stringify({ error: { code: "overloaded", message: "SECRET-PROVIDER-TEXT" } }), { status: 200 })));
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
       priceFor(["m/x"]),
       { skipFileWrites: true },
     );
@@ -126,12 +126,12 @@ describe("g production wiring", () => {
     vi.stubGlobal("fetch", vi.fn(async () =>
       ++n === 1 ? new Response(JSON.stringify({ choices: [] }), { status: 200 }) : okJson()));
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
       priceFor(["m/x"]),
       { skipFileWrites: true },
     );
     expect(runs[0].abortReason).toBeUndefined();
-    expect(new Set(runs[0].calls.map((c) => c.taskId)).size).toBe(7);
+    expect(new Set(runs[0].calls.map((c) => c.taskId)).size).toBe(16);
   });
 
   it("RETRY_DELAYS_MS configures the backoff", async () => {
@@ -148,7 +148,7 @@ describe("g production wiring", () => {
     vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => { lines.push(a.join(" ")); });
     vi.spyOn(console, "error").mockImplementation(() => {});
     const code = await runMain({
-      argv: ["--suite", "0.1.0", "--models", "a/a,b/b", "--runs", "1", "--credit-usd", "100"],
+      argv: ["--suite", "0.2.0", "--models", "a/a,b/b", "--runs", "1", "--credit-usd", "100"],
       env: { OPENROUTER_API_KEY: "test-key-not-real" },
       getGitStatus: () => ({ sha: "0".repeat(40), isDirty: false }),
       skipPricesFetch: true,
@@ -168,7 +168,7 @@ describe("g production wiring", () => {
   });
 
   it("full matrix: every model x suite x run x task gets a fresh client", async () => {
-    for (const suite of ["0.1.0", "0.2.0"]) {
+    for (const suite of ["0.2.0"]) {
       const clients: object[] = [];
       const perClientCalls = new Map<object, number>();
       const models = ["a/a", "b/b"];
@@ -273,12 +273,36 @@ describe("g production wiring", () => {
     expect(parseRetryDelaysEnv("15000,60000,180000")).toEqual([15000, 60000, 180000]);
   });
 
+  it("RETRY_DELAYS_MS rejects 0 (must be positive integers)", () => {
+    expect(parseRetryDelaysEnv("0")).toBeUndefined();
+    expect(parseRetryDelaysEnv("1,0,2")).toBeUndefined();
+  });
+
+  it("RETRY_DELAYS_MS rejects decimals", () => {
+    expect(parseRetryDelaysEnv("1.5")).toBeUndefined();
+    expect(parseRetryDelaysEnv("1000,1.5,2000")).toBeUndefined();
+  });
+
+  it("RETRY_DELAYS_MS rejects scientific notation", () => {
+    expect(parseRetryDelaysEnv("1e3")).toBeUndefined();
+    expect(parseRetryDelaysEnv("1000,1e3,2000")).toBeUndefined();
+  });
+
+  it("RETRY_DELAYS_MS rejects negative values", () => {
+    expect(parseRetryDelaysEnv("-1")).toBeUndefined();
+    expect(parseRetryDelaysEnv("1000,-500,2000")).toBeUndefined();
+  });
+
+  it("RETRY_DELAYS_MS rejects empty string", () => {
+    expect(parseRetryDelaysEnv("")).toBeUndefined();
+  });
+
   it("empty supported_parameters array is treated as not fetched", async () => {
     liveEnv();
     const bodies: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (_u: string, init: RequestInit) => { bodies.push(String(init.body)); return okJson(); }));
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
       priceFor(["m/x"], { supportedParameters: new Map([["m/x", new Set()]]), parametersFetched: false }) as never,
       { skipFileWrites: true },
     );
@@ -294,7 +318,7 @@ describe("g production wiring", () => {
     const bodies: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (_u: string, init: RequestInit) => { bodies.push(String(init.body)); return okJson(); }));
     await runMatrix(
-      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
       priceFor(["m/x"], { supportedParameters: new Map([["m/x", new Set(["temperature"])]]), parametersFetched: true }) as never,
       { skipFileWrites: true },
     );
@@ -306,7 +330,7 @@ describe("g production wiring", () => {
   it("rate-limited model is excluded from pass and mean", async () => {
     liveEnv();
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
       priceFor(["m/x"]),
       {
         skipFileWrites: true,
@@ -326,7 +350,7 @@ describe("g production wiring", () => {
     vi.stubGlobal("fetch", vi.fn(async () =>
       new Response(JSON.stringify({ error: { code: "overloaded" } }), { status: 200 })));
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
       priceFor(["m/x"]),
       { skipFileWrites: true },
     );
@@ -338,7 +362,7 @@ describe("g production wiring", () => {
     liveEnv();
     vi.stubGlobal("fetch", vi.fn(async () => okJson()));
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
       priceFor(["m/x"]),
       { skipFileWrites: true },
     );
@@ -352,7 +376,7 @@ describe("g production wiring", () => {
     liveEnv();
     vi.stubGlobal("fetch", vi.fn(async () => okJson()));
     const { runs } = await runMatrix(
-      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
       priceFor(["m/x"], { supportedParameters: new Map([["m/x", new Set(["max_tokens"])]]), parametersFetched: true }) as never,
       { skipFileWrites: true },
     );
@@ -378,7 +402,7 @@ describe("g production wiring", () => {
     vi.stubGlobal("fetch", vi.fn(async () => okJson()));
 
     await runMatrix(
-      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      { suite: "0.2.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
       priceFor(["m/x"]),
       {
         skipFileWrites: true,
@@ -396,8 +420,8 @@ describe("g production wiring", () => {
       },
     );
 
-    // Verify we created 7 separate clients (one per task) - this proves per-task isolation
-    expect(taskIdx).toBe(7);
+    // Verify we created 16 separate clients (one per task) - this proves per-task isolation
+    expect(taskIdx).toBe(16);
     // Each client was called once - if clients were reused this would be different
     expect(callsPerTask.every((c) => c === 1)).toBe(true);
     // Each budget check should see taskCostSoFar starting at 0 for each new task
