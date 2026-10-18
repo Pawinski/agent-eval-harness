@@ -12,12 +12,19 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReactAgent } from "./agent/react.js";
 import { createLlmClient, OpenRouterClient } from "./llm/index.js";
-import { createDefaultMcpClient } from "./mcp/index.js";
+import {
+  createDefaultMcpClient,
+  InProcessMcpClient,
+  createToolsV2Context,
+  createToolsV2Options,
+  type McpToolClient,
+} from "./mcp/index.js";
 import {
   getSuiteVersionPath,
   runCheck,
   SUITE_VERSION,
   TASKS,
+  TASKS_V2,
   type SuiteTask,
 } from "./suite/index.js";
 
@@ -28,17 +35,20 @@ const LOGS_DIR = path.join(ROOT, "logs");
 type CliArgs = {
   fixture: boolean;
   taskId?: string;
+  suite: string;
   help: boolean;
 };
 
 function parseArgs(argv: string[]): CliArgs {
-  const out: CliArgs = { fixture: false, help: false };
+  const out: CliArgs = { fixture: false, help: false, suite: "0.1.0" };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--fixture" || a === "-f") out.fixture = true;
     else if (a === "--help" || a === "-h") out.help = true;
     else if (a === "--task" || a === "-t") {
       out.taskId = argv[++i];
+    } else if (a === "--suite" || a === "-s") {
+      out.suite = argv[++i];
     }
   }
   return out;
@@ -53,17 +63,28 @@ type TaskOutcome = {
   logPath: string;
 };
 
+interface RunOneTaskOpts {
+  fixture: boolean;
+  runId: string;
+  suite: string;
+  tools?: McpToolClient;
+  maxSteps?: number;
+  maxObservationChars?: number;
+}
+
 async function runOneTask(
   task: SuiteTask,
-  opts: { fixture: boolean; runId: string },
+  opts: RunOneTaskOpts,
 ): Promise<TaskOutcome> {
-  const tools = createDefaultMcpClient();
+  const tools = opts.tools ?? createDefaultMcpClient();
   const llm = createLlmClient();
   const agentLog: unknown[] = [];
 
   let finalAnswer: string;
   let steps: number;
   let transcript = "";
+
+  const maxSteps = opts.maxSteps ?? 8;
 
   if (opts.fixture) {
     finalAnswer = task.fixtureAnswer ?? "";
@@ -74,11 +95,12 @@ async function runOneTask(
     const agent = new ReactAgent({
       llm,
       tools,
-      maxSteps: 8,
+      maxSteps,
       onLog: (e) => {
         agentLog.push(e);
       },
       expectedTools: task.expectedTools,
+      maxObservationChars: opts.maxObservationChars,
     });
     const result = await agent.run(task.prompt);
     finalAnswer = result.finalAnswer;
@@ -124,22 +146,45 @@ async function runOneTask(
 }
 
 function printHelp(): void {
-  console.log(`basilisk-eval — suite ${SUITE_VERSION}
+  console.log(`eval harness — suite ${SUITE_VERSION}
 
 Usage:
-  npm run eval -- [--fixture] [--task <id>]
+  npm run eval -- [--fixture] [--task <id>] [--suite <version>]
 
 Options:
   --fixture, -f   Use frozen fixture answers (no LLM / offline smoke)
   --task, -t      Run a single task id
+  --suite, -s     Suite version (0.1.0 or 0.2.0, default: 0.1.0)
   --help, -h      Show help
 
 Env:
   OPENROUTER_API_KEY  Live multi-model calls (OpenRouter-style)
   MODEL               Pluggable model id (default openai/gpt-4o-mini)
 
-Score: pass/N on suite version (from suite/version.json). Deterministic checkers only (no human grader).
+Score: pass/N on suite version. Deterministic checkers only (no human grader).
 `);
+}
+
+function getSuiteTasksList(suite: string): SuiteTask[] {
+  if (suite === "0.1.0") {
+    return TASKS;
+  }
+  if (suite === "0.2.0") {
+    return TASKS_V2.map((t) => ({
+      id: t.id,
+      description: t.description,
+      prompt: t.prompt,
+      expectedTools: t.expectedTools,
+      check: t.check,
+      fixtureAnswer: t.fixtureAnswer,
+    }));
+  }
+  throw new Error(`Unknown suite version: ${suite}`);
+}
+
+function getV2TaskMaxSteps(taskId: string): number {
+  const task = TASKS_V2.find((t) => t.id === taskId);
+  return task?.maxSteps ?? 8;
 }
 
 async function main(): Promise<void> {
@@ -149,13 +194,23 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  const suiteVersion = args.suite;
+  let allTasks: SuiteTask[];
+  try {
+    allTasks = getSuiteTasksList(suiteVersion);
+  } catch {
+    console.error(`Unknown suite version: ${suiteVersion}`);
+    console.error(`Available suites: 0.1.0, 0.2.0`);
+    process.exit(2);
+  }
+
   const tasks = args.taskId
-    ? TASKS.filter((t) => t.id === args.taskId)
-    : TASKS;
+    ? allTasks.filter((t) => t.id === args.taskId)
+    : allTasks;
 
   if (tasks.length === 0) {
     console.error(`No tasks matched${args.taskId ? `: ${args.taskId}` : ""}`);
-    console.error(`Known ids: ${TASKS.map((t) => t.id).join(", ")}`);
+    console.error(`Known ids: ${allTasks.map((t) => t.id).join(", ")}`);
     process.exit(2);
   }
 
@@ -168,14 +223,31 @@ async function main(): Promise<void> {
       ? "live"
       : "dry-run";
 
-  console.log(`basilisk-eval suite ${SUITE_VERSION}`);
+  let suiteTools: McpToolClient | undefined;
+  let maxObservationChars: number | undefined;
+
+  if (suiteVersion === "0.2.0") {
+    const v2Ctx = createToolsV2Context();
+    suiteTools = new InProcessMcpClient(createToolsV2Options(v2Ctx));
+    maxObservationChars = 4096;
+  }
+
+  console.log(`eval harness suite ${suiteVersion}`);
   console.log(`versionSource=${getSuiteVersionPath()}`);
   console.log(`mode=${mode} tasks=${tasks.length}`);
   console.log("---");
 
   const outcomes: TaskOutcome[] = [];
   for (const task of tasks) {
-    const outcome = await runOneTask(task, { fixture: args.fixture, runId });
+    const maxSteps = suiteVersion === "0.2.0" ? getV2TaskMaxSteps(task.id) : 8;
+    const outcome = await runOneTask(task, {
+      fixture: args.fixture,
+      runId,
+      suite: suiteVersion,
+      tools: suiteTools,
+      maxSteps,
+      maxObservationChars,
+    });
     outcomes.push(outcome);
     const mark = outcome.pass ? "PASS" : "FAIL";
     console.log(
@@ -190,7 +262,7 @@ async function main(): Promise<void> {
     summaryPath,
     JSON.stringify(
       {
-        suiteVersion: SUITE_VERSION,
+        suiteVersion,
         versionSource: getSuiteVersionPath(),
         mode,
         passed,
@@ -210,7 +282,7 @@ async function main(): Promise<void> {
   );
 
   console.log("---");
-  console.log(`Score: ${passed}/${total}  suite ${SUITE_VERSION}`);
+  console.log(`Score: ${passed}/${total}  suite ${suiteVersion}`);
   console.log(`Logs:  ${path.join(LOGS_DIR, runId)}`);
   console.log(`(Re-score after every change. Deterministic checks only.)`);
 

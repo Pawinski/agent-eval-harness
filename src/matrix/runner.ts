@@ -13,8 +13,14 @@ import {
   type LlmClient,
   type LlmCompletionResponse,
 } from "../llm/index.js";
-import { createDefaultMcpClient } from "../mcp/index.js";
-import { runCheck, type SuiteTask } from "../suite/index.js";
+import {
+  createDefaultMcpClient,
+  InProcessMcpClient,
+  createToolsV2Context,
+  createToolsV2Options,
+  type McpToolClient,
+} from "../mcp/index.js";
+import { runCheck, type SuiteTask, TASKS_V2 } from "../suite/index.js";
 import {
   calculateCallCost,
   calculateWorstCaseCost,
@@ -96,6 +102,16 @@ function isMaxStepsExceeded(answer: string): boolean {
   return answer === "(max steps exceeded)";
 }
 
+function getTaskMaxSteps(task: SuiteTask, suite: string, suiteMaxSteps: number): number {
+  if (suite === "0.2.0") {
+    const v2Task = TASKS_V2.find((t) => t.id === task.id);
+    if (v2Task?.maxSteps) {
+      return Math.min(v2Task.maxSteps, 12);
+    }
+  }
+  return suiteMaxSteps;
+}
+
 export function sanitizeModelId(modelId: string): string {
   return modelId.replace(/\//g, "__");
 }
@@ -130,6 +146,9 @@ interface RunContext {
   cumulativeCost: number;
   globalCapUsd?: number;
   fixture: boolean;
+  suite: string;
+  tools?: McpToolClient;
+  maxObservationChars?: number;
 }
 
 export interface MatrixLlmClientConfig {
@@ -230,6 +249,8 @@ async function runOneTaskWithTracking(
     ctx.pricing,
   );
 
+  const taskMaxSteps = getTaskMaxSteps(task, ctx.suite, ctx.maxSteps);
+
   if (ctx.fixture) {
     const fixtureAnswer = task.fixtureAnswer ?? "";
     const check = runCheck(fixtureAnswer, 0, task.check);
@@ -250,7 +271,7 @@ async function runOneTaskWithTracking(
     };
   }
 
-  const tools = createDefaultMcpClient();
+  const tools = ctx.tools ?? createDefaultMcpClient();
   const baseLlm = llmClientFactory
     ? llmClientFactory(ctx.model, MAX_COMPLETION_TOKENS)
     : createLlmClient({ defaultModel: ctx.model, maxTokens: MAX_COMPLETION_TOKENS });
@@ -301,11 +322,12 @@ async function runOneTaskWithTracking(
     const agent = new ReactAgent({
       llm: wrappedLlm,
       tools,
-      maxSteps: ctx.maxSteps,
+      maxSteps: taskMaxSteps,
       onLog: (e: ReactLogEntry) => {
         agentLog.push(e);
       },
       expectedTools: task.expectedTools,
+      maxObservationChars: ctx.maxObservationChars,
     });
 
     const result = await agent.run(task.prompt);
@@ -423,6 +445,15 @@ export async function runMatrix(
   const maxInputTokens = suiteConfig.maxInputTokens;
   const iMax = getDefaultIMax(config.suite, maxSteps);
 
+  let suiteTools: McpToolClient | undefined;
+  let maxObservationChars: number | undefined;
+
+  if (config.suite === "0.2.0") {
+    const v2Ctx = createToolsV2Context();
+    suiteTools = new InProcessMcpClient(createToolsV2Options(v2Ctx));
+    maxObservationChars = 4096;
+  }
+
   const runs: RunResult[] = [];
   const skippedModels: SkippedModel[] = [];
   let cumulativeCost = 0;
@@ -484,6 +515,9 @@ export async function runMatrix(
         cumulativeCost,
         globalCapUsd: config.capUsd,
         fixture: config.fixture,
+        suite: config.suite,
+        tools: suiteTools,
+        maxObservationChars,
       };
 
       let pass = 0;

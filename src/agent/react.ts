@@ -27,6 +27,8 @@ export type ReactAgentOptions = {
   onLog?: (entry: ReactLogEntry) => void;
   /** If present, only these tools (registry order, unknown ignored). Empty [] = no tools. */
   expectedTools?: string[];
+  /** Truncate observations to this many characters. Default: no truncation. */
+  maxObservationChars?: number;
 };
 
 const DEFAULT_SYSTEM = `You are a ReAct agent. Use this format strictly:
@@ -198,6 +200,7 @@ export class ReactAgent {
   private readonly systemPrompt: string;
   private readonly onLog?: (entry: ReactLogEntry) => void;
   private readonly expectedTools?: string[];
+  private readonly maxObservationChars?: number;
 
   constructor(opts: ReactAgentOptions) {
     this.llm = opts.llm;
@@ -206,6 +209,7 @@ export class ReactAgent {
     this.systemPrompt = opts.systemPrompt ?? DEFAULT_SYSTEM;
     this.onLog = opts.onLog;
     this.expectedTools = opts.expectedTools;
+    this.maxObservationChars = opts.maxObservationChars;
   }
 
   async run(taskPrompt: string): Promise<ReactRunResult> {
@@ -338,9 +342,14 @@ export class ReactAgent {
       });
 
       const result = await this.tools.callTool({ name: parsed.action, arguments: args });
-      const observation = result.ok
+      let observation = result.ok
         ? result.content
         : `ERROR: ${result.error ?? "tool failed"}`;
+
+      const wasTruncated = this.maxObservationChars && observation.length > this.maxObservationChars;
+      if (wasTruncated) {
+        observation = observation.slice(0, this.maxObservationChars) + "\n[truncated]";
+      }
 
       pushLog(log, this.onLog, "observation", {
         step,
@@ -348,6 +357,7 @@ export class ReactAgent {
         content: result.content,
         error: result.error,
         data: result.data,
+        truncated: wasTruncated,
       });
 
       if (result.ok && observation && !looksLikeBadFinal(observation)) {

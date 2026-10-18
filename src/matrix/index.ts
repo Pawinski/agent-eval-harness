@@ -56,6 +56,7 @@ export {
   getDefaultIMax,
   getDefaultMaxInputTokens,
   getSuiteTasks,
+  getSuiteTasksV2,
 } from "./types.js";
 
 export {

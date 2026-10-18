@@ -1,0 +1,7 @@
+[
+  {"orderId": "ORD-001", "customer": "Acme Corp", "items": [{"sku": "W-100", "qty": 5, "unit": 10.00}], "status": "shipped"},
+  {"orderId": "ORD-002", "customer": "Beta Inc", "items": [{"sku": "W-200", "qty": 3, "unit": 25.00}], "status": "pending"},
+  {"orderId": "ORD-003", "customer": "Acme Corp", "items": [{"sku": "W-100", "qty": 10, "unit": 10.00}, {"sku": "W-300", "qty": 2, "unit": 50.00}], "status": "shipped"},
+  {"orderId": "ORD-004", "customer": "Gamma LLC", "items": [{"sku": "W-200", "qty": 1, "unit": 25.00}], "status": "cancelled"},
+  {"orderId": "ORD-005", "customer": "Beta Inc", "items": [{"sku": "W-300", "qty": 4, "unit": 50.00}], "status": "shipped"}
+]
