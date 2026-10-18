@@ -622,10 +622,12 @@ describe("matrix integration with retries", () => {
     );
 
     const run = runs[0];
-    expect(run.abortReason).toBe("provider_error");
+    // One provider error is HTTP-class: it does not abort the model on its own.
+    expect(run.abortReason).toBeUndefined();
 
     const errorCall = run.calls.find(c => c.providerError);
     expect(errorCall).toBeDefined();
+    expect(errorCall?.httpError).toBe(true);
     expect(errorCall?.providerError?.code).toBe("test_error");
     expect(errorCall?.providerError?.type).toBe("test_type");
   });

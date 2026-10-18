@@ -14,7 +14,7 @@ import { pathToFileURL } from "node:url";
 import { PROJECT_NAME } from "./name.js";
 import { runPreflight } from "./mcp/index.js";
 import {
-  fetchModelPrices,
+  fetchModelPricesWithParams,
   validatePricesForModels,
   createFixturePrices,
   sortModelsByFullWorstCase,
@@ -35,6 +35,7 @@ import {
   SUITE_CONFIGS,
   getDefaultCapUsd,
   getSuiteTasks,
+  getCallsPerRun,
   MAX_COMPLETION_TOKENS,
   type RunResult,
   type PriceData,
@@ -458,7 +459,7 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
   } else {
     console.log("Fetching model prices from OpenRouter...");
     try {
-      priceData = await fetchModelPrices(args.models);
+      priceData = await fetchModelPricesWithParams(args.models);
     } catch (err) {
       const redacted = redactError(err);
       console.error(`Error fetching prices: ${redacted.message}`);
@@ -478,13 +479,13 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
   const suiteConfig = SUITE_CONFIGS[args.suite] ?? { maxSteps: 8 };
   const maxSteps = suiteConfig.maxSteps;
   const iMax = getDefaultIMax(args.suite, maxSteps);
+  const callsPerRun = getCallsPerRun(args.suite);
 
   const sortedModels = sortModelsByFullWorstCase(
     args.models,
     priceData,
     args.runs,
-    tasks.length,
-    maxSteps,
+    callsPerRun,
     iMax,
   );
   console.log(`Running models (ascending worst-case): ${sortedModels.join(", ")}`);
@@ -569,7 +570,11 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
       onModelAbort: (model, reason) => {
         console.log(`Model aborted: ${model} - ${reason}`);
       },
-      onModelSkipped: (model, worstCase, remaining, shortfall, reason) => {
+      onModelSkipped: (model, worstCase, remaining, shortfall, reason, retries) => {
+        if (reason === "rate_limited") {
+          console.log(`Skipped (rate_limited): ${model} after ${retries ?? 0} retries`);
+          return;
+        }
         console.log(`Skipped (${reason}): ${model} (worst case $${worstCase.toFixed(4)} > remaining $${remaining.toFixed(4)}, shortfall $${shortfall.toFixed(4)})`);
       },
       onGlobalAbort: () => {
@@ -588,11 +593,14 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
   if (skippedModels.length > 0) {
     console.log("\n--- Skipped Models ---");
     for (const skipped of skippedModels) {
-      console.log(`  ${skipped.model} (skipped: ${skipped.reason}): worst case $${skipped.worstCase.toFixed(4)}, remaining $${skipped.remaining.toFixed(4)}`);
+      const retryNote = skipped.retries !== undefined ? `, retries ${skipped.retries}` : "";
+      console.log(`  ${skipped.model} (skipped: ${skipped.reason}): worst case $${skipped.worstCase.toFixed(4)}, remaining $${skipped.remaining.toFixed(4)}${retryNote}`);
     }
     const parts: string[] = [];
     if (creditTopUp > 0) parts.push(`credit top-up $${creditTopUp.toFixed(2)}`);
     if (capShortfall > 0) parts.push(`cap shortfall $${capShortfall.toFixed(2)}`);
+    const skippedRetries = skippedModels.reduce((n, s) => n + (s.retries ?? 0), 0);
+    if (skippedModels.some((s) => s.reason === "rate_limited")) parts.push(`retries ${skippedRetries}`);
     console.log(`\nSKIPPED: ${skippedModels.length} model(s), ${parts.join(" / ") || "no shortfall"}`);
   }
 

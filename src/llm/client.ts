@@ -99,6 +99,14 @@ export class RateLimitExhaustedError extends Error {
   }
 }
 
+/** Parse RETRY_DELAYS_MS (comma-separated ms, e.g. "15000,60000,180000"); undefined if unset/invalid. */
+export function parseRetryDelaysEnv(raw: string | undefined): number[] | undefined {
+  if (!raw) return undefined;
+  const parts = raw.split(",").map((p) => Number(p.trim()));
+  if (parts.length === 0 || parts.some((n) => !Number.isFinite(n) || n < 0)) return undefined;
+  return parts;
+}
+
 /** Default sleep using setTimeout */
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -133,7 +141,8 @@ export class OpenRouterClient implements LlmClient {
     this.cacheBreakpoint =
       opts.cacheBreakpoint ?? getCacheBreakpointEnabled().enabled;
 
-    this.retryDelays = opts.retryConfig?.delays ?? DEFAULT_RETRY_DELAYS;
+    this.retryDelays =
+      opts.retryConfig?.delays ?? parseRetryDelaysEnv(process.env.RETRY_DELAYS_MS) ?? DEFAULT_RETRY_DELAYS;
     this.preRetryCheck = opts.retryConfig?.preRetryCheck;
     this.sleep = opts.retryConfig?.sleep ?? defaultSleep;
     this.supportedParameters = opts.supportedParameters;

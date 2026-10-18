@@ -187,6 +187,8 @@ export interface RunResult {
   emptyCount: number;
   calls: CallResult[];
   retries: number;
+  /** true/false in live runs (was supported_parameters available from /models); null in fixture mode */
+  parametersFetched: boolean | null;
 }
 
 export interface MatrixResult {

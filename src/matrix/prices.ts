@@ -35,8 +35,10 @@ export async function fetchModelPrices(
 
 export async function fetchModelPricesWithParams(
   requestedModels: string[],
+  modelsUrl: string = OPENROUTER_MODELS_URL,
 ): Promise<PriceDataWithParams> {
-  const response = await fetch(OPENROUTER_MODELS_URL);
+  // Public endpoint: no Authorization header is sent.
+  const response = await fetch(modelsUrl);
 
   if (!response.ok) {
     throw new Error(
@@ -236,8 +238,7 @@ export function sortModelsByFullWorstCase(
   models: string[],
   priceData: PriceData,
   runs: number,
-  taskCount: number,
-  maxSteps: number,
+  callsPerRun: number,
   iMax: number,
 ): string[] {
   return [...models].sort((a, b) => {
@@ -248,8 +249,8 @@ export function sortModelsByFullWorstCase(
     if (!priceA) return 1;
     if (!priceB) return -1;
 
-    const costA = calculateModelFullWorstCase(runs, taskCount, maxSteps, iMax, priceA);
-    const costB = calculateModelFullWorstCase(runs, taskCount, maxSteps, iMax, priceB);
+    const costA = calculateModelFullWorstCaseWithCallsPerRun(runs, callsPerRun, iMax, priceA);
+    const costB = calculateModelFullWorstCaseWithCallsPerRun(runs, callsPerRun, iMax, priceB);
 
     return costA - costB;
   });
