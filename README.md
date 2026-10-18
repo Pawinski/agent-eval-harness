@@ -73,6 +73,45 @@ npm run eval -- --task echo_hello
 npm run typecheck
 ```
 
+## Running the matrix
+
+The matrix runner evaluates multiple models across multiple runs with cost caps.
+
+**Basic usage (suite 0.1.0):**
+
+```bash
+OPENROUTER_API_KEY=... npm run matrix
+```
+
+**Suite 0.2.0** (when available):
+
+```bash
+OPENROUTER_API_KEY=... npm run matrix -- --suite 0.2.0
+```
+
+**Override models, runs, and cap:**
+
+```bash
+OPENROUTER_API_KEY=... npm run matrix -- --models openai/gpt-4o-mini --runs 1 --cap-usd 5
+```
+
+**Fixture mode** (offline, no API key required):
+
+```bash
+npm run matrix -- --fixture
+```
+
+### Defaults
+
+- **Suite**: 0.1.0
+- **Runs**: 3 per model
+- **Models**: nex-agi/nex-n2.5-pro, openai/gpt-4o-mini, anthropic/claude-haiku-5.5, mistralai/mistral-large-2512, openai/gpt-6.1-sol, anthropic/claude-opus-5.5 (sorted cheapest first)
+- **Cap**: $10.00 for 0.1.0, $35.00 for 0.2.0
+
+### Output
+
+Results are written to `results/<suite>/` with per-run JSON files and a summary. The runner prints the exact file paths at the end.
+
 ## Task IDs (suite 0.1.0)
 
 | ID | Check |

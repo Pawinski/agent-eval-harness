@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node --import tsx src/run.ts",
     "eval": "node --import tsx src/run.ts",
+    "matrix": "node --import tsx src/matrix.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "ban-scan": "node --import tsx src/tests/ban-scan.ts"

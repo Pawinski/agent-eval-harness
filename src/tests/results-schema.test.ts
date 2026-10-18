@@ -39,6 +39,7 @@ function collectJsonFiles(dir: string): string[] {
   try {
     const entries = readdirSync(dir);
     for (const entry of entries) {
+      if (entry.startsWith("_")) continue;
       const fullPath = path.join(dir, entry);
       const stat = statSync(fullPath);
       if (stat.isDirectory()) {
