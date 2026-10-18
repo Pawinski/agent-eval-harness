@@ -73,6 +73,64 @@ npm run eval -- --task echo_hello
 npm run typecheck
 ```
 
+## Running the matrix
+
+The matrix runner evaluates multiple models across multiple runs with cost caps.
+
+**Basic usage (suite 0.1.0):**
+
+```bash
+OPENROUTER_API_KEY=... npm run matrix
+```
+
+**Suite 0.2.0** (when available):
+
+```bash
+OPENROUTER_API_KEY=... npm run matrix -- --suite 0.2.0
+```
+
+**Override models, runs, and cap:**
+
+```bash
+OPENROUTER_API_KEY=... npm run matrix -- --models openai/gpt-4o-mini --runs 1 --cap-usd 5
+```
+
+**Fixture mode** (offline, no API key required):
+
+```bash
+npm run matrix -- --fixture
+```
+
+### Defaults
+
+- **Suite**: 0.1.0
+- **Runs**: 3 per model
+- **Models**: nex-agi/nex-n2.5-pro, openai/gpt-4o-mini, anthropic/claude-haiku-5.5, mistralai/mistral-large-2512, openai/gpt-6.1-sol, anthropic/claude-opus-5.5 (sorted by worst-case cost)
+- **Cap**: $10.00 for 0.1.0, $35.00 for 0.2.0
+
+### Credit Pre-flight
+
+Before each model, the runner checks available credit:
+- GET `/api/v1/key` → `limit_remaining` (null = unlimited)
+- GET `/api/v1/credits` → `total_credits - total_usage`
+
+Models run in ascending full-worst-case order (runs × per-run worst case). Before each model, remaining is calculated as:
+```
+remaining = min(startingCredit - cumulativeSpend, capUsd - cumulativeSpend)
+```
+
+If remaining < model worst case, the model is skipped cleanly (zero LLM calls):
+- **skipped: credit** — when credit binds (shows credit top-up needed)
+- **skipped: cap** — when cap binds (shows cap shortfall)
+
+When models are skipped, the runner prints `SKIPPED: N model(s), credit top-up $X / cap shortfall $Y` and exits 0 (completed runs are valid).
+
+If both credit endpoints fail, OR if `/credits` fails AND `/key` reports null limit, the runner refuses unless `--credit-usd <n>` is given to override.
+
+### Output
+
+Results are written to `results/<suite>/` with per-run JSON files and a summary. The runner prints the exact file paths at the end. Skipped models with their status (skipped: credit or skipped: cap) are shown in the summary tables.
+
 ## Task IDs (suite 0.1.0)
 
 | ID | Check |

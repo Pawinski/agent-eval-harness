@@ -25,3 +25,12 @@ jobs:
       - run: npm test
 
       - run: npm run eval -- --fixture
+
+      - name: Matrix fixture in path with spaces
+        run: |
+          mkdir -p "/tmp/test dir with spaces"
+          cp -r . "/tmp/test dir with spaces/repo"
+          cd "/tmp/test dir with spaces/repo"
+          npm run matrix -- --fixture
+          test -d results-fixture/0.1.0 || { echo "results-fixture/0.1.0 missing"; exit 1; }
+          ls -la results-fixture/0.1.0/
