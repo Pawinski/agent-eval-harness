@@ -1,59 +1,30 @@
 /**
- * Cache breakpoint env var with backwards compatibility.
+ * Cache breakpoint env var.
  *
- * New: AGENT_EVAL_CACHE_BREAKPOINT
- * Legacy: the previous variable name (deprecated, warns once)
+ * AGENT_EVAL_CACHE_BREAKPOINT=1 enables cache_control ephemeral on system messages.
  */
 
-const LEGACY_VAR_NAME = ["BASI", "LISK_CACHE_BREAKPOINT"].join("");
-const NEW_VAR_NAME = "AGENT_EVAL_CACHE_BREAKPOINT";
-
-let deprecationWarned = false;
+const ENV_VAR_NAME = "AGENT_EVAL_CACHE_BREAKPOINT";
 
 export interface CacheBreakpointResult {
   enabled: boolean;
-  source: "new" | "legacy" | "none";
+  source: "new" | "none";
 }
 
 export function getCacheBreakpointEnabled(
   env: Record<string, string | undefined> = process.env,
 ): CacheBreakpointResult {
-  const newVal = env[NEW_VAR_NAME];
-  const legacyVal = env[LEGACY_VAR_NAME];
+  const val = env[ENV_VAR_NAME];
 
-  if (newVal === "1") {
+  if (val === "1") {
     return { enabled: true, source: "new" };
   }
 
-  if (newVal !== undefined) {
+  if (val !== undefined) {
     return { enabled: false, source: "new" };
-  }
-
-  if (legacyVal === "1") {
-    if (!deprecationWarned) {
-      deprecationWarned = true;
-      console.error(
-        `Warning: ${LEGACY_VAR_NAME} is deprecated. Use ${NEW_VAR_NAME} instead.`,
-      );
-    }
-    return { enabled: true, source: "legacy" };
-  }
-
-  if (legacyVal !== undefined) {
-    if (!deprecationWarned) {
-      deprecationWarned = true;
-      console.error(
-        `Warning: ${LEGACY_VAR_NAME} is deprecated. Use ${NEW_VAR_NAME} instead.`,
-      );
-    }
-    return { enabled: false, source: "legacy" };
   }
 
   return { enabled: false, source: "none" };
 }
 
-export function resetDeprecationWarning(): void {
-  deprecationWarned = false;
-}
-
-export { NEW_VAR_NAME, LEGACY_VAR_NAME };
+export { ENV_VAR_NAME as NEW_VAR_NAME };

@@ -130,7 +130,7 @@ describe("payload-identity", () => {
 
   it("full-suite request bodies match the pre-rename golden (0.2.0)", async () => {
     // Build the client exactly as `npm run eval` does: library defaults, no env overrides.
-    for (const k of ["MAX_TOKENS", "AGENT_EVAL_CACHE_BREAKPOINT", ["BASI", "LISK_CACHE_BREAKPOINT"].join("")]) {
+    for (const k of ["MAX_TOKENS", "AGENT_EVAL_CACHE_BREAKPOINT"]) {
       vi.stubEnv(k, undefined as unknown as string);
     }
     const bodies: string[] = [];
