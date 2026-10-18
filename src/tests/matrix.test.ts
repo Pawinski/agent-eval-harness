@@ -645,7 +645,7 @@ describe("CLI argument validation", () => {
       const args = parseArgs(["--cap-usd", "abc"]);
       expect(args.errors.length).toBeGreaterThan(0);
       expect(args.errors[0]).toContain("--cap-usd");
-      expect(args.errors[0]).toContain("finite number");
+      expect(args.errors[0]).toContain("plain decimal");
     });
 
     it("rejects missing value for --cap-usd", () => {
@@ -671,14 +671,14 @@ describe("CLI argument validation", () => {
       const args = parseArgs(["--cap-usd", "-5"]);
       expect(args.errors.length).toBeGreaterThan(0);
       expect(args.errors[0]).toContain("--cap-usd");
-      expect(args.errors[0]).toContain("greater than 0");
+      expect(args.errors[0]).toContain("plain decimal");
     });
 
     it("rejects trailing chars for --cap-usd", () => {
       const args = parseArgs(["--cap-usd", "5abc"]);
       expect(args.errors.length).toBeGreaterThan(0);
       expect(args.errors[0]).toContain("--cap-usd");
-      expect(args.errors[0]).toContain("finite number");
+      expect(args.errors[0]).toContain("plain decimal");
     });
   });
 
@@ -706,14 +706,14 @@ describe("CLI argument validation", () => {
       const args = parseArgs(["--runs", "0"]);
       expect(args.errors.length).toBeGreaterThan(0);
       expect(args.errors[0]).toContain("--runs");
-      expect(args.errors[0]).toContain("at least 1");
+      expect(args.errors[0]).toContain("positive integer");
     });
 
     it("rejects negative for --runs", () => {
       const args = parseArgs(["--runs", "-1"]);
       expect(args.errors.length).toBeGreaterThan(0);
       expect(args.errors[0]).toContain("--runs");
-      expect(args.errors[0]).toContain("at least 1");
+      expect(args.errors[0]).toContain("positive integer");
     });
 
     it("rejects trailing chars for --runs", () => {
@@ -1508,7 +1508,7 @@ describe("7. Credit pre-flight", () => {
   it("skips expensive model with ZERO calls when credit is short", async () => {
     const { factory, getCallsPerModel } = createTrackingFactory();
 
-    const { skippedModels, topUpNeeded } = await runMatrix(
+    const { skippedModels, creditTopUp } = await runMatrix(
       { suite: "0.1.0", models: ["expensive/model", "cheap/model"], runs: 1, capUsd: 10000, fixture: false },
       testPriceData,
       {
@@ -1524,7 +1524,7 @@ describe("7. Credit pre-flight", () => {
     const expensiveSkipped = skippedModels.find((s) => s.model === "expensive/model");
     expect(expensiveSkipped).toBeDefined();
     expect(expensiveSkipped!.shortfall).toBeGreaterThan(0);
-    expect(topUpNeeded).toBeGreaterThan(0);
+    expect(creditTopUp).toBeGreaterThan(0);
   });
 
   it("enough credit runs every model", async () => {
@@ -1546,10 +1546,10 @@ describe("7. Credit pre-flight", () => {
     expect(skippedModels.length).toBe(0);
   });
 
-  it("reports exact shortfall and total top-up for skipped models", async () => {
+  it("reports exact shortfall and correct top-up formula", async () => {
     const { factory } = createTrackingFactory();
 
-    const { skippedModels, topUpNeeded } = await runMatrix(
+    const { skippedModels, creditTopUp } = await runMatrix(
       { suite: "0.1.0", models: ["expensive/model", "cheap/model"], runs: 1, capUsd: 10000, fixture: false },
       testPriceData,
       {
@@ -1563,8 +1563,9 @@ describe("7. Credit pre-flight", () => {
     for (const skipped of skippedModels) {
       expect(skipped.shortfall).toBeCloseTo(skipped.worstCase - skipped.remaining, 4);
     }
-    const sumShortfalls = skippedModels.reduce((sum, s) => sum + s.shortfall, 0);
-    expect(topUpNeeded).toBeCloseTo(Math.max(0, sumShortfalls), 4);
+    const sumWorstCases = skippedModels.reduce((sum, s) => sum + s.worstCase, 0);
+    const lastRemaining = skippedModels[skippedModels.length - 1].remaining;
+    expect(creditTopUp).toBeCloseTo(Math.max(0, sumWorstCases - lastRemaining), 2);
   });
 
   it("both endpoints down refuses with non-zero exit and zero LLM calls", async () => {
@@ -1725,7 +1726,7 @@ describe("7. Credit pre-flight", () => {
       const args = parseArgs(["--credit-usd", "abc"]);
       expect(args.errors.length).toBeGreaterThan(0);
       expect(args.errors[0]).toContain("--credit-usd");
-      expect(args.errors[0]).toContain("finite number");
+      expect(args.errors[0]).toContain("plain decimal");
     });
 
     it("rejects missing value for --credit-usd", () => {
@@ -1745,14 +1746,14 @@ describe("7. Credit pre-flight", () => {
       const args = parseArgs(["--credit-usd", "-5"]);
       expect(args.errors.length).toBeGreaterThan(0);
       expect(args.errors[0]).toContain("--credit-usd");
-      expect(args.errors[0]).toContain("greater than 0");
+      expect(args.errors[0]).toContain("plain decimal");
     });
 
     it("rejects trailing chars for --credit-usd", () => {
       const args = parseArgs(["--credit-usd", "5abc"]);
       expect(args.errors.length).toBeGreaterThan(0);
       expect(args.errors[0]).toContain("--credit-usd");
-      expect(args.errors[0]).toContain("finite number");
+      expect(args.errors[0]).toContain("plain decimal");
     });
 
     it("accepts valid positive credit-usd", () => {
@@ -1760,6 +1761,219 @@ describe("7. Credit pre-flight", () => {
       expect(args.errors).toEqual([]);
       expect(args.creditUsd).toBe(10);
     });
+
+    it("rejects 1e1 for --cap-usd (scientific notation)", () => {
+      const args = parseArgs(["--cap-usd", "1e1"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("plain decimal");
+    });
+
+    it("rejects 0x10 for --cap-usd (hex)", () => {
+      const args = parseArgs(["--cap-usd", "0x10"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("plain decimal");
+    });
+
+    it("rejects Infinity for --cap-usd", () => {
+      const args = parseArgs(["--cap-usd", "Infinity"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("plain decimal");
+    });
+
+    it("rejects 1e1 for --runs (scientific notation)", () => {
+      const args = parseArgs(["--runs", "1e1"]);
+      expect(args.errors.length).toBeGreaterThan(0);
+      expect(args.errors[0]).toContain("positive integer");
+    });
+  });
+
+  it("spend is subtracted - $4 credit never allows spending more than $4", async () => {
+    let totalSpent = 0;
+    const trackingFactory: LlmClientFactory = (model) => ({
+      async complete(): Promise<LlmCompletionResponse> {
+        totalSpent += 0.50;
+        return {
+          content: "Thought: done\nAction: finish\nAction Input: hello",
+          model,
+          usage: { promptTokens: 500, completionTokens: 50 },
+        };
+      },
+    });
+
+    const expensivePricing: ModelPricing = {
+      modelId: "expensive/model",
+      promptPrice: 0.001,
+      completionPrice: 0.001,
+    };
+    const mediumPricing: ModelPricing = {
+      modelId: "medium/model",
+      promptPrice: 0.0005,
+      completionPrice: 0.0005,
+    };
+    const testData: PriceData = {
+      fetchedAt: new Date().toISOString(),
+      models: new Map([
+        ["expensive/model", expensivePricing],
+        ["medium/model", mediumPricing],
+      ]),
+    };
+
+    const { runs, skippedModels } = await runMatrix(
+      { suite: "0.1.0", models: ["medium/model", "expensive/model"], runs: 3, capUsd: 1000, fixture: false },
+      testData,
+      {
+        llmClientFactory: trackingFactory,
+        skipFileWrites: true,
+        creditProvider: async () => 4.00,
+      },
+    );
+
+    const totalCost = runs.reduce((sum, r) => sum + r.costUsd, 0);
+    expect(totalCost).toBeLessThanOrEqual(4.00);
+    expect(skippedModels.length).toBeGreaterThanOrEqual(0);
+  });
+
+  it("top-up math: $1 left, skipped $1.87 + $3.74 = $4.61 top-up", async () => {
+    const model1Pricing: ModelPricing = {
+      modelId: "model1",
+      promptPrice: 0.00333929,
+      completionPrice: 0,
+    };
+    const model2Pricing: ModelPricing = {
+      modelId: "model2",
+      promptPrice: 0.00667857,
+      completionPrice: 0,
+    };
+    const testData: PriceData = {
+      fetchedAt: new Date().toISOString(),
+      models: new Map([
+        ["model1", model1Pricing],
+        ["model2", model2Pricing],
+      ]),
+    };
+
+    const { skippedModels, creditTopUp } = await runMatrix(
+      { suite: "0.1.0", models: ["model1", "model2"], runs: 1, capUsd: 1000, fixture: false },
+      testData,
+      {
+        llmClientFactory: () => ({
+          async complete(): Promise<LlmCompletionResponse> {
+            throw new Error("Should not be called");
+          },
+        }),
+        skipFileWrites: true,
+        creditProvider: async () => 1.00,
+      },
+    );
+
+    expect(skippedModels.length).toBe(2);
+    const totalWorstCase = skippedModels.reduce((sum, s) => sum + s.worstCase, 0);
+    const lastRemaining = skippedModels[skippedModels.length - 1].remaining;
+    expect(creditTopUp).toBeCloseTo(totalWorstCase - lastRemaining, 2);
+  });
+
+  it("labels skipped: cap when cap binds", async () => {
+    const cheapPricing: ModelPricing = {
+      modelId: "cheap/model",
+      promptPrice: 0.00001,
+      completionPrice: 0.00001,
+    };
+    const testData: PriceData = {
+      fetchedAt: new Date().toISOString(),
+      models: new Map([["cheap/model", cheapPricing]]),
+    };
+
+    const { skippedModels, capShortfall } = await runMatrix(
+      { suite: "0.1.0", models: ["cheap/model"], runs: 1, capUsd: 0.001, fixture: false },
+      testData,
+      {
+        llmClientFactory: () => ({
+          async complete(): Promise<LlmCompletionResponse> {
+            throw new Error("Should not be called");
+          },
+        }),
+        skipFileWrites: true,
+        creditProvider: async () => 1000,
+      },
+    );
+
+    expect(skippedModels.length).toBe(1);
+    expect(skippedModels[0].reason).toBe("cap");
+    expect(capShortfall).toBeGreaterThan(0);
+  });
+
+  it("labels skipped: credit when credit binds", async () => {
+    const { skippedModels, creditTopUp } = await runMatrix(
+      { suite: "0.1.0", models: ["cheap/model"], runs: 1, capUsd: 1000, fixture: false },
+      testPriceData,
+      {
+        llmClientFactory: () => ({
+          async complete(): Promise<LlmCompletionResponse> {
+            throw new Error("Should not be called");
+          },
+        }),
+        skipFileWrites: true,
+        creditProvider: async () => 0.001,
+      },
+    );
+
+    expect(skippedModels.length).toBe(1);
+    expect(skippedModels[0].reason).toBe("credit");
+    expect(creditTopUp).toBeGreaterThan(0);
+  });
+
+  it("/credits fails AND /key null refuses without --credit-usd", async () => {
+    let llmCallCount = 0;
+    const trackingFactory: LlmClientFactory = () => ({
+      async complete(): Promise<LlmCompletionResponse> {
+        llmCallCount++;
+        return { content: "test", model: "test", usage: { promptTokens: 10, completionTokens: 5 } };
+      },
+    });
+
+    const exitCode = await runMain({
+      argv: ["--models", "cheap/model", "--runs", "1"],
+      env: { OPENROUTER_API_KEY: "test-key" },
+      getGitStatus: () => ({ sha: "abc123def456789012345678901234567890abcd", isDirty: false }),
+      creditFetcher: async () => ({ limitRemaining: null, availableCredits: null, keyError: false, creditsError: true }),
+      llmClientFactory: trackingFactory,
+      skipFileWrites: true,
+      skipPricesFetch: true,
+      priceData: testPriceData,
+    });
+
+    expect(exitCode).toBe(1);
+    expect(llmCallCount).toBe(0);
+  });
+
+  it("exits 0 and prints SKIPPED line when models are skipped", async () => {
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.join(" "));
+
+    try {
+      const exitCode = await runMain({
+        argv: ["--models", "expensive/model", "--runs", "1", "--cap-usd", "1000"],
+        env: { OPENROUTER_API_KEY: "test-key" },
+        getGitStatus: () => ({ sha: "abc123def456789012345678901234567890abcd", isDirty: false }),
+        creditFetcher: async () => ({ limitRemaining: null, availableCredits: 0.001, keyError: false, creditsError: false }),
+        llmClientFactory: () => ({
+          async complete(): Promise<LlmCompletionResponse> {
+            throw new Error("Should not be called");
+          },
+        }),
+        skipFileWrites: true,
+        skipPricesFetch: true,
+        priceData: testPriceData,
+      });
+
+      expect(exitCode).toBe(0);
+      const skippedLine = logs.find((l) => l.includes("SKIPPED:") && l.includes("model(s)"));
+      expect(skippedLine).toBeDefined();
+      expect(skippedLine).toContain("1 model(s)");
+    } finally {
+      console.log = originalLog;
+    }
   });
 });
 

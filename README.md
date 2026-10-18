@@ -110,17 +110,26 @@ npm run matrix -- --fixture
 
 ### Credit Pre-flight
 
-Before each model, the runner checks available credit via OpenRouter API:
+Before each model, the runner checks available credit:
 - GET `/api/v1/key` → `limit_remaining` (null = unlimited)
 - GET `/api/v1/credits` → `total_credits - total_usage`
 
-Models run in ascending full-worst-case order (runs × per-run worst case). If remaining credit is less than a model's worst case, the model is skipped cleanly (zero LLM calls).
+Models run in ascending full-worst-case order (runs × per-run worst case). Before each model, remaining is calculated as:
+```
+remaining = min(startingCredit - cumulativeSpend, capUsd - cumulativeSpend)
+```
 
-If both credit endpoints fail, the runner refuses unless `--credit-usd <n>` is given to override.
+If remaining < model worst case, the model is skipped cleanly (zero LLM calls):
+- **skipped: credit** — when credit binds (shows credit top-up needed)
+- **skipped: cap** — when cap binds (shows cap shortfall)
+
+When models are skipped, the runner prints `SKIPPED: N model(s), credit top-up $X / cap shortfall $Y` and exits 0 (completed runs are valid).
+
+If both credit endpoints fail, OR if `/credits` fails AND `/key` reports null limit, the runner refuses unless `--credit-usd <n>` is given to override.
 
 ### Output
 
-Results are written to `results/<suite>/` with per-run JSON files and a summary. The runner prints the exact file paths at the end. Skipped models and top-up needed are included in the summary.
+Results are written to `results/<suite>/` with per-run JSON files and a summary. The runner prints the exact file paths at the end. Skipped models with their status (skipped: credit or skipped: cap) are shown in the summary tables.
 
 ## Task IDs (suite 0.1.0)
 

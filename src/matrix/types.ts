@@ -18,11 +18,14 @@ export type AbortReason =
   | "global_cap"
   | "skipped_credit";
 
+export type SkipReason = "credit" | "cap";
+
 export interface SkippedModel {
   model: string;
   worstCase: number;
   remaining: number;
   shortfall: number;
+  reason: SkipReason;
 }
 
 export class MatrixAbort extends Error {

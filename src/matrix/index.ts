@@ -45,6 +45,7 @@ export {
   type RunResult,
   type ResultRow,
   type SkippedModel,
+  type SkipReason,
   MatrixAbort,
   SUITE_CONFIGS,
   DEFAULT_MODELS,

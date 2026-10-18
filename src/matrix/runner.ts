@@ -363,12 +363,14 @@ async function runOneTaskWithTracking(
   };
 }
 
+import type { SkipReason } from "./types.js";
+
 export interface MatrixRunnerCallbacks {
   onRunStart?: (model: string, runN: number) => void;
   onTaskComplete?: (model: string, runN: number, taskId: string, pass: boolean) => void;
   onRunComplete?: (result: RunResult) => void;
   onModelAbort?: (model: string, reason: AbortReason) => void;
-  onModelSkipped?: (model: string, worstCase: number, remaining: number, shortfall: number) => void;
+  onModelSkipped?: (model: string, worstCase: number, remaining: number, shortfall: number, reason: SkipReason) => void;
   onGlobalAbort?: () => void;
 }
 
@@ -377,7 +379,7 @@ export interface LlmClientFactory {
 }
 
 export interface CreditProvider {
-  (): Promise<number | null>;
+  (cumulativeSpend: number): Promise<number | null>;
 }
 
 export interface MatrixRunnerOptions {
@@ -391,7 +393,8 @@ export interface MatrixRunResult {
   runs: RunResult[];
   globalAbort: boolean;
   skippedModels: SkippedModel[];
-  topUpNeeded: number;
+  creditTopUp: number;
+  capShortfall: number;
 }
 
 export async function runMatrix(
@@ -440,14 +443,24 @@ export async function runMatrix(
     );
 
     if (creditProvider && !config.fixture) {
-      const credit = await creditProvider();
+      const startingCredit = await creditProvider(cumulativeCost);
+      const remainingCredit = startingCredit !== null ? startingCredit - cumulativeCost : null;
       const remainingCap = (config.capUsd ?? Infinity) - cumulativeCost;
-      const remaining = credit !== null ? Math.min(credit, remainingCap) : remainingCap;
+
+      let remaining: number;
+      let reason: SkipReason;
+      if (remainingCredit !== null && remainingCredit <= remainingCap) {
+        remaining = remainingCredit;
+        reason = "credit";
+      } else {
+        remaining = remainingCap;
+        reason = "cap";
+      }
 
       if (remaining < modelFullWorstCase) {
         const shortfall = modelFullWorstCase - remaining;
-        skippedModels.push({ model: modelId, worstCase: modelFullWorstCase, remaining, shortfall });
-        callbacks?.onModelSkipped?.(modelId, modelFullWorstCase, remaining, shortfall);
+        skippedModels.push({ model: modelId, worstCase: modelFullWorstCase, remaining, shortfall, reason });
+        callbacks?.onModelSkipped?.(modelId, modelFullWorstCase, remaining, shortfall, reason);
         continue;
       }
     }
@@ -604,10 +617,18 @@ export async function runMatrix(
     }
   }
 
-  // Top-up needed formula:
-  // sum of (skipped model worst case - remaining credit at time of skip), floored at 0
-  // This equals the sum of shortfalls since shortfall = worstCase - remaining
-  const topUpNeeded = Math.max(0, skippedModels.reduce((sum, m) => sum + m.shortfall, 0));
+  // Top-up / shortfall calculation:
+  // Sum of skipped worst cases minus the final remaining (at time of last skip), floored at 0
+  // Separate by reason: credit-bound skips -> creditTopUp, cap-bound skips -> capShortfall
+  const creditSkipped = skippedModels.filter((m) => m.reason === "credit");
+  const capSkipped = skippedModels.filter((m) => m.reason === "cap");
 
-  return { runs, globalAbort, skippedModels, topUpNeeded };
+  const creditTopUp = creditSkipped.length > 0
+    ? Math.max(0, creditSkipped.reduce((sum, m) => sum + m.worstCase, 0) - creditSkipped[creditSkipped.length - 1].remaining)
+    : 0;
+  const capShortfall = capSkipped.length > 0
+    ? Math.max(0, capSkipped.reduce((sum, m) => sum + m.worstCase, 0) - capSkipped[capSkipped.length - 1].remaining)
+    : 0;
+
+  return { runs, globalAbort, skippedModels, creditTopUp, capShortfall };
 }

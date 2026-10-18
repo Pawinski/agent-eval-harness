@@ -93,28 +93,21 @@ export function parseArgs(argv: string[]): ParsedCliArgs {
       if (val === undefined || val.startsWith("--")) {
         args.errors.push("--runs requires a value");
         if (val !== undefined) i--;
+      } else if (!/^[1-9]\d*$/.test(val)) {
+        args.errors.push(`--runs must be a positive integer (digits only), got: ${val}`);
       } else {
-        const parsed = Number(val);
-        if (!Number.isFinite(parsed)) {
-          args.errors.push(`--runs must be an integer, got: ${val}`);
-        } else if (!Number.isInteger(parsed)) {
-          args.errors.push(`--runs must be an integer, got: ${val}`);
-        } else if (parsed < 1) {
-          args.errors.push(`--runs must be at least 1, got: ${parsed}`);
-        } else {
-          args.runs = parsed;
-        }
+        args.runs = parseInt(val, 10);
       }
     } else if (a === "--cap-usd" || a === "-c") {
       const val = argv[++i];
       if (val === undefined || val.startsWith("--")) {
         args.errors.push("--cap-usd requires a value");
         if (val !== undefined) i--;
+      } else if (!/^\d+(\.\d+)?$/.test(val)) {
+        args.errors.push(`--cap-usd must be a plain decimal (e.g. 10 or 10.5), got: ${val}`);
       } else {
-        const parsed = Number(val);
-        if (!Number.isFinite(parsed)) {
-          args.errors.push(`--cap-usd must be a finite number, got: ${val}`);
-        } else if (parsed <= 0) {
+        const parsed = parseFloat(val);
+        if (parsed <= 0) {
           args.errors.push(`--cap-usd must be greater than 0, got: ${parsed}`);
         } else {
           args.capUsd = parsed;
@@ -125,11 +118,11 @@ export function parseArgs(argv: string[]): ParsedCliArgs {
       if (val === undefined || val.startsWith("--")) {
         args.errors.push("--credit-usd requires a value");
         if (val !== undefined) i--;
+      } else if (!/^\d+(\.\d+)?$/.test(val)) {
+        args.errors.push(`--credit-usd must be a plain decimal (e.g. 10 or 10.5), got: ${val}`);
       } else {
-        const parsed = Number(val);
-        if (!Number.isFinite(parsed)) {
-          args.errors.push(`--credit-usd must be a finite number, got: ${val}`);
-        } else if (parsed <= 0) {
+        const parsed = parseFloat(val);
+        if (parsed <= 0) {
           args.errors.push(`--credit-usd must be greater than 0, got: ${parsed}`);
         } else {
           args.creditUsd = parsed;
@@ -226,7 +219,7 @@ function computeModelStats(runs: RunResult[]): Map<string, ModelStats> {
   return stats;
 }
 
-function printSummaryToConsole(runs: RunResult[], suite: string, capUsd: number, taskCount: number): void {
+function printSummaryToConsole(runs: RunResult[], suite: string, capUsd: number, taskCount: number, skippedModels: SkippedModel[] = []): void {
   console.log("\n=== Matrix Summary ===");
   console.log(`Suite: ${suite} | Cap: $${capUsd.toFixed(2)} | Tasks: ${taskCount}`);
   console.log("");
@@ -234,14 +227,20 @@ function printSummaryToConsole(runs: RunResult[], suite: string, capUsd: number,
 
   const stats = computeModelStats(runs);
   console.log("\n--- Per-Model Summary ---");
-  console.log("| Model | Runs | Mean | Spread | Total In | Total Out | Cached | Empty | Total Cost |");
-  console.log("|-------|------|------|--------|----------|-----------|--------|-------|------------|");
+  console.log("| Model | Runs | Mean | Spread | Total In | Total Out | Cached | Empty | Total Cost | Status |");
+  console.log("|-------|------|------|--------|----------|-----------|--------|-------|------------|--------|");
 
   for (const [model, s] of stats) {
     const passStr = s.passes.map((p) => `${p}/${taskCount}`).join(", ");
     const cached = s.totalCached !== null ? String(s.totalCached) : "-";
     console.log(
-      `| ${model} | ${passStr} | ${s.mean.toFixed(2)} | ${s.spread} | ${s.totalIn} | ${s.totalOut} | ${cached} | ${s.totalEmpty} | $${s.totalCost.toFixed(6)} |`,
+      `| ${model} | ${passStr} | ${s.mean.toFixed(2)} | ${s.spread} | ${s.totalIn} | ${s.totalOut} | ${cached} | ${s.totalEmpty} | $${s.totalCost.toFixed(6)} | - |`,
+    );
+  }
+
+  for (const skipped of skippedModels) {
+    console.log(
+      `| ${skipped.model} | - | - | - | - | - | - | - | - | skipped: ${skipped.reason} |`,
     );
   }
 }
@@ -255,7 +254,8 @@ async function writeSummaryFiles(
   taskCount: number,
   fixture: boolean,
   skippedModels: SkippedModel[] = [],
-  topUpNeeded: number = 0,
+  creditTopUp: number = 0,
+  capShortfall: number = 0,
 ): Promise<{ jsonPath: string; mdPath: string }> {
   const sha7 = getGitSha7();
   const date = getTodayDate();
@@ -307,8 +307,10 @@ async function writeSummaryFiles(
       worst_case: s.worstCase,
       remaining: s.remaining,
       shortfall: s.shortfall,
+      reason: s.reason,
     })),
-    topUpNeeded,
+    creditTopUp,
+    capShortfall,
   };
 
   await writeFile(jsonPath, safeStringify(summaryJson, 2), "utf8");
@@ -328,25 +330,32 @@ async function writeSummaryFiles(
   mdLines.push("");
   mdLines.push("## Per-Model Summary");
   mdLines.push("");
-  mdLines.push("| Model | Runs | Mean | Spread | Total Cost |");
-  mdLines.push("|-------|------|------|--------|------------|");
+  mdLines.push("| Model | Runs | Mean | Spread | Total Cost | Status |");
+  mdLines.push("|-------|------|------|--------|------------|--------|");
 
   for (const [model, s] of stats) {
     const passStr = s.passes.map((p) => `${p}/${taskCount}`).join(", ");
-    mdLines.push(`| ${model} | ${passStr} | ${s.mean.toFixed(2)} | ${s.spread} | $${s.totalCost.toFixed(6)} |`);
+    mdLines.push(`| ${model} | ${passStr} | ${s.mean.toFixed(2)} | ${s.spread} | $${s.totalCost.toFixed(6)} | - |`);
+  }
+
+  for (const skipped of skippedModels) {
+    mdLines.push(`| ${skipped.model} | - | - | - | - | skipped: ${skipped.reason} |`);
   }
 
   if (skippedModels.length > 0) {
     mdLines.push("");
-    mdLines.push("## Skipped Models (insufficient credit)");
+    mdLines.push("## Skipped Models");
     mdLines.push("");
-    mdLines.push("| Model | Worst Case | Remaining | Shortfall |");
-    mdLines.push("|-------|------------|-----------|-----------|");
+    mdLines.push("| Model | Status | Worst Case | Remaining | Shortfall |");
+    mdLines.push("|-------|--------|------------|-----------|-----------|");
     for (const s of skippedModels) {
-      mdLines.push(`| ${s.model} | $${s.worstCase.toFixed(4)} | $${s.remaining.toFixed(4)} | $${s.shortfall.toFixed(4)} |`);
+      mdLines.push(`| ${s.model} | skipped: ${s.reason} | $${s.worstCase.toFixed(4)} | $${s.remaining.toFixed(4)} | $${s.shortfall.toFixed(4)} |`);
     }
     mdLines.push("");
-    mdLines.push(`**Top-up needed**: $${topUpNeeded.toFixed(2)}`);
+    const parts: string[] = [];
+    if (creditTopUp > 0) parts.push(`**Credit top-up**: $${creditTopUp.toFixed(2)}`);
+    if (capShortfall > 0) parts.push(`**Cap shortfall**: $${capShortfall.toFixed(2)}`);
+    if (parts.length > 0) mdLines.push(parts.join(" | "));
   }
 
   await writeFile(mdPath, mdLines.join("\n") + "\n", "utf8");
@@ -493,6 +502,12 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
         return 1;
       }
 
+      if (creditResult.creditsError && creditResult.limitRemaining === null) {
+        console.error("Error: /credits failed and /key reports no limit.");
+        console.error("Use --credit-usd to override.");
+        return 1;
+      }
+
       const values: number[] = [];
       if (creditResult.limitRemaining !== null) {
         values.push(creditResult.limitRemaining);
@@ -527,7 +542,7 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
     fixture: args.fixture,
   };
 
-  const { runs, globalAbort, skippedModels, topUpNeeded } = await runMatrix(config, priceData, {
+  const { runs, globalAbort, skippedModels, creditTopUp, capShortfall } = await runMatrix(config, priceData, {
     callbacks: {
       onRunStart: (model, runN) => {
         console.log(`Starting: ${model} run ${runN}`);
@@ -548,8 +563,8 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
       onModelAbort: (model, reason) => {
         console.log(`Model aborted: ${model} - ${reason}`);
       },
-      onModelSkipped: (model, worstCase, remaining, shortfall) => {
-        console.log(`Skipped: ${model} (worst case $${worstCase.toFixed(4)} > remaining $${remaining.toFixed(4)}, shortfall $${shortfall.toFixed(4)})`);
+      onModelSkipped: (model, worstCase, remaining, shortfall, reason) => {
+        console.log(`Skipped (${reason}): ${model} (worst case $${worstCase.toFixed(4)} > remaining $${remaining.toFixed(4)}, shortfall $${shortfall.toFixed(4)})`);
       },
       onGlobalAbort: () => {
         console.log("GLOBAL CAP REACHED - halting matrix");
@@ -565,18 +580,20 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
   }
 
   if (skippedModels.length > 0) {
-    console.log("\n--- Skipped Models (insufficient credit) ---");
+    console.log("\n--- Skipped Models ---");
     for (const skipped of skippedModels) {
-      console.log(`  ${skipped.model}: worst case $${skipped.worstCase.toFixed(4)}, remaining $${skipped.remaining.toFixed(4)}, shortfall $${skipped.shortfall.toFixed(4)}`);
+      console.log(`  ${skipped.model} (skipped: ${skipped.reason}): worst case $${skipped.worstCase.toFixed(4)}, remaining $${skipped.remaining.toFixed(4)}`);
     }
-    // Top-up formula: sum of shortfalls, floored at 0
-    console.log(`\nTop-up needed: $${topUpNeeded.toFixed(2)}`);
+    const parts: string[] = [];
+    if (creditTopUp > 0) parts.push(`credit top-up $${creditTopUp.toFixed(2)}`);
+    if (capShortfall > 0) parts.push(`cap shortfall $${capShortfall.toFixed(2)}`);
+    console.log(`\nSKIPPED: ${skippedModels.length} model(s), ${parts.join(" / ") || "no shortfall"}`);
   }
 
-  printSummaryToConsole(runs, args.suite, capUsd, tasks.length);
+  printSummaryToConsole(runs, args.suite, capUsd, tasks.length, skippedModels);
 
   if (!deps.skipFileWrites) {
-    const { jsonPath, mdPath } = await writeSummaryFiles(runs, args.suite, priceData, capUsd, globalAbort, tasks.length, args.fixture, skippedModels, topUpNeeded);
+    const { jsonPath, mdPath } = await writeSummaryFiles(runs, args.suite, priceData, capUsd, globalAbort, tasks.length, args.fixture, skippedModels, creditTopUp, capShortfall);
 
     console.log("\n--- Output Files ---");
     console.log(`Summary JSON: ${jsonPath}`);
