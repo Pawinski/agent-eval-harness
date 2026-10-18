@@ -5,6 +5,8 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -14,8 +16,17 @@ import {
   scanFile,
   generateCandidates,
   checkLine,
+  exitCode,
   BANNED_HASHES,
+  SPAN_HASHES,
+  ALLOWLIST,
+  MIN_TERM_LEN,
+  MAX_TERM_LEN,
 } from "./ban-scan.js";
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+// Synthetic separator term ("zzfakeword zzother" normalizes to the joined form).
+const SYNTHETIC_SPAN_HASH = createHash("sha256").update("zzfakewordzzother").digest("hex");
 
 const SYNTHETIC_TERM = "zzsyntheticfaketermzz";
 const SYNTHETIC_HASH = createHash("sha256").update(SYNTHETIC_TERM).digest("hex");
@@ -88,6 +99,98 @@ describe("ban-scan", () => {
 
     const result = runScan(tempDir, TEST_HASHES, undefined, new Map());
     expect(result.total).toBe(1);
+  });
+
+  it("detects term embedded in longer words (old substring parity)", () => {
+    const testFile = path.join(tempDir, "embedded.ts");
+    writeFileSync(
+      testFile,
+      [
+        `const a = "${SYNTHETIC_TERM}s";`,
+        `const myZz${SYNTHETIC_TERM.toUpperCase()}App = 1;`,
+        `const id_${SYNTHETIC_TERM}2026 = 2;`,
+        `// pre${SYNTHETIC_TERM}ing`,
+        `const clean = "zzsynthetic only";`,
+      ].join("\n") + "\n",
+    );
+
+    const result = runScan(tempDir, TEST_HASHES, undefined, new Map());
+    expect(result.hits.map((h) => h.line)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("detects separator terms embedded across two runs only for span hashes", () => {
+    const lines = [
+      "x outzzfakeword zzotherx",
+      "id_zzfakeword-zzother2026",
+      "zzfakewordzzother",
+    ];
+    for (const l of lines) {
+      expect(checkLine(l, new Set([SYNTHETIC_SPAN_HASH]), undefined, new Set([SYNTHETIC_SPAN_HASH]))).toBe(true);
+    }
+    // Without the span set, cross-run embedding is not matched.
+    expect(checkLine(lines[0], new Set([SYNTHETIC_SPAN_HASH]), undefined, new Set())).toBe(false);
+  });
+
+  it("detects a 5-way split across string concatenation", () => {
+    const testFile = path.join(tempDir, "concat5.ts");
+    writeFileSync(testFile, `const x = "zzsyn-thet-ic" + "fake-termzz";\n`);
+    const result = runScan(tempDir, TEST_HASHES, undefined, new Map());
+    expect(result.total).toBe(1);
+  });
+
+  it("detects a 5-part array join", () => {
+    const testFile = path.join(tempDir, "join5.ts");
+    writeFileSync(testFile, `const x = ["zz", "synth", "etic", "fake", "termzz"].join("");\n`);
+    const result = runScan(tempDir, TEST_HASHES, undefined, new Map());
+    expect(result.total).toBe(1);
+  });
+
+  it("exitCode is 1 on non-allowed hits and 0 otherwise", () => {
+    expect(exitCode({ hits: [{ path: "a", line: 1, allowed: false }], total: 1, allowedCount: 0 })).toBe(1);
+    expect(exitCode({ hits: [{ path: "a", line: 1, allowed: true }], total: 1, allowedCount: 1 })).toBe(0);
+    expect(exitCode({ hits: [], total: 0, allowedCount: 0 })).toBe(0);
+  });
+
+  it("CLI on the repo exits 0 with exactly the allowlisted hits", () => {
+    const script = path.join(REPO_ROOT, "src/tests/ban-scan.ts");
+    const out = execFileSync(process.execPath, ["--import", "tsx", script], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+    });
+    const expected = [...ALLOWLIST].flatMap(([f, ls]) => [...ls].map((l) => `${f}:${l} [allowed]`));
+    const hitLines = out.split("\n").filter((l) => /:\d+( \[allowed\])?$/.test(l));
+    expect(hitLines.sort()).toEqual(expected.sort());
+    expect(out).toContain(`PASS: 0 non-allowed hits, ${expected.length} allowed`);
+  });
+
+  it("CLI exits 1 on non-allowed hits and shows counts only", () => {
+    const testFile = path.join(tempDir, "violation.ts");
+    writeFileSync(testFile, `const secret = "${SYNTHETIC_TERM}";\n`);
+
+    const script = path.join(REPO_ROOT, "src/tests/ban-scan.ts");
+    let exitCode: number | null = null;
+    let stdout = "";
+    try {
+      stdout = execFileSync(process.execPath, ["--import", "tsx", script], {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          BAN_SCAN_ROOT: tempDir,
+          BAN_SCAN_TEST_HASH: SYNTHETIC_HASH,
+        },
+      });
+      exitCode = 0;
+    } catch (e: unknown) {
+      const err = e as { status?: number; stdout?: string };
+      exitCode = err.status ?? null;
+      stdout = err.stdout ?? "";
+    }
+
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("violation.ts:1");
+    expect(stdout).toContain("FAIL: 1 non-allowed hit(s)");
+    expect(stdout.toLowerCase()).not.toContain(SYNTHETIC_TERM.toLowerCase());
   });
 
   it("output contains no scanned terms", () => {
@@ -229,6 +332,21 @@ describe("ban-scan", () => {
 
     it("has expected count", () => {
       expect(BANNED_HASHES.size).toBe(10);
+    });
+
+    it("matches the pinned digest of the sorted hash set (catches dropped or swapped hashes)", () => {
+      const digest = hashString([...BANNED_HASHES].sort().join("\n"));
+      expect(digest).toBe("4fcebbc2f5cb4a5b184171273e787712ad998479c222e84ec76ed13d828ae615");
+    });
+
+    it("SPAN_HASHES is a subset of BANNED_HASHES", () => {
+      expect(SPAN_HASHES.size).toBe(2);
+      for (const h of SPAN_HASHES) expect(BANNED_HASHES.has(h)).toBe(true);
+    });
+
+    it("synthetic term length is within the substring window", () => {
+      expect(SYNTHETIC_TERM.length).toBeGreaterThanOrEqual(MIN_TERM_LEN);
+      expect(SYNTHETIC_TERM.length).toBeLessThanOrEqual(MAX_TERM_LEN);
     });
   });
 });

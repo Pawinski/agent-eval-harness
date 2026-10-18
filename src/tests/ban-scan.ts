@@ -6,6 +6,12 @@
  * Detection: extracts alphanumeric runs from each line, normalizes (lowercase, a-z0-9 only),
  * then hashes individual runs and concatenations of 2-4 adjacent runs. Also detects string
  * literal fragments joined by + or .join() within a line. Compares against a set of SHA256 hashes.
+ *
+ * Substring parity with the old plaintext scanner (case-insensitive substring match): every
+ * substring of a normalized run with length MIN_TERM_LEN..MAX_TERM_LEN is hashed too, so a term
+ * embedded in a longer word (prefix, suffix, plural, identifier) is still caught. Terms that
+ * contain a separator (listed in SPAN_HASHES) are also matched across the boundary of two
+ * adjacent runs. Banned terms must normalize to MIN_TERM_LEN..MAX_TERM_LEN characters.
  */
 
 import { createHash } from "node:crypto";
@@ -34,15 +40,27 @@ export const BANNED_HASHES = new Set([
 ]);
 
 /**
+ * Subset of BANNED_HASHES whose original term contains a separator (space or hyphen).
+ * These are also matched as substrings spanning two adjacent runs.
+ */
+export const SPAN_HASHES = new Set([
+  "304e1b9833fb7aa34933689d332ba49890310202d86ad343760f703700d0a966",
+  "36dcf0328d674af11b53f1a19285e709ccb8e44308c0c487960853894792fdef",
+]);
+
+export const MIN_TERM_LEN = 4;
+export const MAX_TERM_LEN = 24;
+
+/**
  * Allowlist: file paths (relative to root) with specific line numbers that are permitted.
  * Keyed by relative path, value is set of 1-indexed line numbers.
  */
 export const ALLOWLIST: Map<string, Set<number>> = new Map([
   ["src/llm/client.ts", new Set([261])],
-  ["src/tests/payload-identity.test.ts", new Set([77, 78])],
+  ["src/tests/payload-identity.test.ts", new Set([77])],
 ]);
 
-export const SCAN_EXTENSIONS = [".ts", ".js", ".json", ".md", ".txt", ".env"];
+export const SCAN_EXTENSIONS = [".ts", ".js", ".json", ".md", ".txt", ".env", ".yml", ".yaml"];
 export const IGNORE_DIRS = ["node_modules", ".git", "dist", "logs"];
 
 function normalize(s: string): string {
@@ -121,17 +139,61 @@ export function generateCandidates(line: string): string[] {
   return candidates;
 }
 
+/**
+ * Substrings of each normalized run (single-run parity with the old substring scanner).
+ */
+export function generateSubstrings(line: string): string[] {
+  const out: string[] = [];
+  for (const run of extractAlphanumericRuns(line)) {
+    const r = normalize(run);
+    if (r.length <= MIN_TERM_LEN) continue; // whole run already a candidate
+    for (let len = MIN_TERM_LEN; len <= Math.min(MAX_TERM_LEN, r.length - 1); len++) {
+      for (let i = 0; i + len <= r.length; i++) {
+        out.push(r.slice(i, i + len));
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Substrings that cross the boundary between two adjacent normalized runs.
+ */
+export function generateSpanSubstrings(line: string): string[] {
+  const out: string[] = [];
+  const runs = extractAlphanumericRuns(line).map(normalize);
+  for (let k = 0; k + 1 < runs.length; k++) {
+    const left = runs[k];
+    const right = runs[k + 1];
+    const joined = left + right;
+    const b = left.length;
+    for (let len = MIN_TERM_LEN; len <= MAX_TERM_LEN; len++) {
+      for (let i = Math.max(0, b - len + 1); i < b && i + len <= joined.length; i++) {
+        out.push(joined.slice(i, i + len));
+      }
+    }
+  }
+  return out;
+}
+
 export function checkLine(
   line: string,
   hashes: Set<string>,
   extraHashes?: Set<string>,
+  spanHashes: Set<string> = SPAN_HASHES,
 ): boolean {
-  const candidates = generateCandidates(line);
-  for (const c of candidates) {
+  const has = (h: string) => hashes.has(h) || (extraHashes?.has(h) ?? false);
+  for (const c of generateCandidates(line)) {
     if (c.length === 0) continue;
-    const h = hashString(c);
-    if (hashes.has(h)) return true;
-    if (extraHashes?.has(h)) return true;
+    if (has(hashString(c))) return true;
+  }
+  for (const c of generateSubstrings(line)) {
+    if (has(hashString(c))) return true;
+  }
+  if (spanHashes.size > 0) {
+    for (const c of generateSpanSubstrings(line)) {
+      if (spanHashes.has(hashString(c))) return true;
+    }
   }
   return false;
 }
@@ -166,6 +228,7 @@ export function scanFile(
   hashes: Set<string> = BANNED_HASHES,
   allowedLines?: Set<number>,
   extraHashes?: Set<string>,
+  spanHashes: Set<string> = SPAN_HASHES,
 ): Array<{ line: number; allowed: boolean }> {
   const violations: Array<{ line: number; allowed: boolean }> = [];
   const content = readFileSync(filePath, "utf8");
@@ -173,7 +236,7 @@ export function scanFile(
 
   for (let i = 0; i < lines.length; i++) {
     const lineNum = i + 1;
-    if (checkLine(lines[i], hashes, extraHashes)) {
+    if (checkLine(lines[i], hashes, extraHashes, spanHashes)) {
       const allowed = allowedLines?.has(lineNum) ?? false;
       violations.push({ line: lineNum, allowed });
     }
@@ -194,6 +257,7 @@ export function runScan(
   ignoreDirs: string[] = IGNORE_DIRS,
   allowlist: Map<string, Set<number>> = ALLOWLIST,
   extraHashes?: Set<string>,
+  spanHashes: Set<string> = SPAN_HASHES,
 ): ScanResult {
   const files = scanDir(rootDir, ignoreDirs);
   const hits: Array<{ path: string; line: number; allowed: boolean }> = [];
@@ -201,7 +265,7 @@ export function runScan(
   for (const file of files) {
     const relPath = path.relative(rootDir, file);
     const allowedLines = allowlist.get(relPath);
-    const violations = scanFile(file, hashes, allowedLines, extraHashes);
+    const violations = scanFile(file, hashes, allowedLines, extraHashes, spanHashes);
 
     for (const v of violations) {
       hits.push({ path: relPath, line: v.line, allowed: v.allowed });
@@ -235,11 +299,19 @@ export function formatOutput(result: ScanResult): string {
   return lines.join("\n");
 }
 
-function main(): void {
-  const result = runScan(ROOT);
-  console.log(formatOutput(result));
+export function exitCode(result: ScanResult): number {
   const nonAllowed = result.total - result.allowedCount;
-  process.exit(nonAllowed > 0 ? 1 : 0);
+  return nonAllowed > 0 ? 1 : 0;
+}
+
+function main(): void {
+  const testHash = process.env.BAN_SCAN_TEST_HASH;
+  const extraHashes = testHash ? new Set([testHash]) : undefined;
+  const scanRoot = process.env.BAN_SCAN_ROOT ?? ROOT;
+  const allowlist = process.env.BAN_SCAN_ROOT ? new Map() : ALLOWLIST;
+  const result = runScan(scanRoot, BANNED_HASHES, IGNORE_DIRS, allowlist, extraHashes);
+  console.log(formatOutput(result));
+  process.exit(exitCode(result));
 }
 
 const isMainModule =
