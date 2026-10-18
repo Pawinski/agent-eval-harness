@@ -171,6 +171,7 @@ export interface CallResult {
   retries?: number;
   droppedParameters?: string[];
   providerError?: { code?: string; type?: string };
+  temperatureSent?: boolean;
 }
 
 export interface RunResult {

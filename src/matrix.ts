@@ -175,8 +175,9 @@ function formatSummaryTable(runs: RunResult[]): string {
     const empty = run.emptyTasks.length > 0 ? run.emptyTasks.join(", ") : "-";
     const abort = run.abortReason ?? "-";
     const cached = run.tokensCached !== null ? String(run.tokensCached) : "-";
+    const passStr = run.abortReason ? `not scored (${run.abortReason})` : `${run.pass}/${run.total}`;
     lines.push(
-      `| ${run.model} | ${run.runN} | ${run.pass}/${run.total} | ${run.tokensIn} | ${run.tokensOut} | ${cached} | $${run.costUsd.toFixed(6)} | ${empty} | ${abort} |`,
+      `| ${run.model} | ${run.runN} | ${passStr} | ${run.tokensIn} | ${run.tokensOut} | ${cached} | $${run.costUsd.toFixed(6)} | ${empty} | ${abort} |`,
     );
   }
 
@@ -192,6 +193,7 @@ interface ModelStats {
   totalOut: number;
   totalCached: number | null;
   totalEmpty: number;
+  abortedRuns: number;
 }
 
 function computeModelStats(runs: RunResult[]): Map<string, ModelStats> {
@@ -204,20 +206,22 @@ function computeModelStats(runs: RunResult[]): Map<string, ModelStats> {
 
   const stats = new Map<string, ModelStats>();
   for (const [model, modelRuns] of byModel) {
-    const passes = modelRuns.map((r) => r.pass);
-    const mean = passes.reduce((a, b) => a + b, 0) / passes.length;
-    const spread = Math.max(...passes) - Math.min(...passes);
+    const scoredRuns = modelRuns.filter((r) => !r.abortReason);
+    const abortedRuns = modelRuns.filter((r) => r.abortReason).length;
+    const passes = scoredRuns.map((r) => r.pass);
+    const mean = passes.length > 0 ? passes.reduce((a, b) => a + b, 0) / passes.length : 0;
+    const spread = passes.length > 0 ? Math.max(...passes) - Math.min(...passes) : 0;
     const totalCost = modelRuns.reduce((a, r) => a + r.costUsd, 0);
     const totalIn = modelRuns.reduce((a, r) => a + r.tokensIn, 0);
     const totalOut = modelRuns.reduce((a, r) => a + r.tokensOut, 0);
-    const totalEmpty = modelRuns.reduce((a, r) => a + r.emptyCount, 0);
+    const totalEmpty = scoredRuns.reduce((a, r) => a + r.emptyCount, 0);
     let totalCached: number | null = null;
     for (const r of modelRuns) {
       if (r.tokensCached !== null) {
         totalCached = (totalCached ?? 0) + r.tokensCached;
       }
     }
-    stats.set(model, { passes, mean, spread, totalCost, totalIn, totalOut, totalCached, totalEmpty });
+    stats.set(model, { passes, mean, spread, totalCost, totalIn, totalOut, totalCached, totalEmpty, abortedRuns });
   }
 
   return stats;
@@ -235,10 +239,22 @@ function printSummaryToConsole(runs: RunResult[], suite: string, capUsd: number,
   console.log("|-------|------|------|--------|----------|-----------|--------|-------|------------|--------|");
 
   for (const [model, s] of stats) {
-    const passStr = s.passes.map((p) => `${p}/${taskCount}`).join(", ");
+    let passStr: string;
+    let meanStr: string;
+    let spreadStr: string;
+    if (s.passes.length === 0) {
+      passStr = "-";
+      meanStr = "-";
+      spreadStr = "-";
+    } else {
+      passStr = s.passes.map((p) => `${p}/${taskCount}`).join(", ");
+      meanStr = s.mean.toFixed(2);
+      spreadStr = String(s.spread);
+    }
     const cached = s.totalCached !== null ? String(s.totalCached) : "-";
+    const status = s.abortedRuns > 0 ? `${s.abortedRuns} aborted` : "-";
     console.log(
-      `| ${model} | ${passStr} | ${s.mean.toFixed(2)} | ${s.spread} | ${s.totalIn} | ${s.totalOut} | ${cached} | ${s.totalEmpty} | $${s.totalCost.toFixed(6)} | - |`,
+      `| ${model} | ${passStr} | ${meanStr} | ${spreadStr} | ${s.totalIn} | ${s.totalOut} | ${cached} | ${s.totalEmpty} | $${s.totalCost.toFixed(6)} | ${status} |`,
     );
   }
 
@@ -338,8 +354,20 @@ async function writeSummaryFiles(
   mdLines.push("|-------|------|------|--------|------------|--------|");
 
   for (const [model, s] of stats) {
-    const passStr = s.passes.map((p) => `${p}/${taskCount}`).join(", ");
-    mdLines.push(`| ${model} | ${passStr} | ${s.mean.toFixed(2)} | ${s.spread} | $${s.totalCost.toFixed(6)} | - |`);
+    let passStr: string;
+    let meanStr: string;
+    let spreadStr: string;
+    if (s.passes.length === 0) {
+      passStr = "-";
+      meanStr = "-";
+      spreadStr = "-";
+    } else {
+      passStr = s.passes.map((p) => `${p}/${taskCount}`).join(", ");
+      meanStr = s.mean.toFixed(2);
+      spreadStr = String(s.spread);
+    }
+    const status = s.abortedRuns > 0 ? `${s.abortedRuns} aborted` : "-";
+    mdLines.push(`| ${model} | ${passStr} | ${meanStr} | ${spreadStr} | $${s.totalCost.toFixed(6)} | ${status} |`);
   }
 
   for (const skipped of skippedModels) {
@@ -459,8 +487,9 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
     priceData = deps.priceData;
   } else {
     console.log("Fetching model prices from OpenRouter...");
+    const base = (env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1").replace(/\/$/, "");
     try {
-      priceData = await fetchModelPricesWithParams(args.models);
+      priceData = await fetchModelPricesWithParams(args.models, `${base}/models`);
     } catch (err) {
       const redacted = redactError(err);
       console.error(`Error fetching prices: ${redacted.message}`);
@@ -602,7 +631,8 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
     console.log("\n--- Skipped Models ---");
     for (const skipped of skippedModels) {
       const retryNote = skipped.retries !== undefined ? `, retries ${skipped.retries}` : "";
-      console.log(`  ${skipped.model} (skipped: ${skipped.reason}): worst case $${skipped.worstCase.toFixed(4)}, remaining $${skipped.remaining.toFixed(4)}${retryNote}`);
+      const remainingLabel = skipped.reason === "credit" ? "credit" : "cap";
+      console.log(`  ${skipped.model} (skipped: ${skipped.reason}): worst case $${skipped.worstCase.toFixed(4)}, ${remainingLabel} $${skipped.remaining.toFixed(4)}${retryNote}`);
     }
     const parts: string[] = [];
     if (creditTopUp > 0) parts.push(`credit top-up $${creditTopUp.toFixed(2)}`);

@@ -342,6 +342,7 @@ async function runOneTaskWithTracking(
         retries: callRetries > 0 ? callRetries : undefined,
         droppedParameters: usage._meta?.droppedParameters,
         providerError: usage._meta?.providerError,
+        temperatureSent: usage._meta?.temperatureSent,
       });
     },
   });

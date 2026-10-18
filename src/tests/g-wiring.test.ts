@@ -6,10 +6,10 @@
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { OpenRouterClient, RateLimitExhaustedError, type LlmClient, type LlmCompletionResponse } from "../llm/client.js";
+import { OpenRouterClient, RateLimitExhaustedError, parseRetryDelaysEnv, type LlmClient, type LlmCompletionResponse } from "../llm/client.js";
 import { runMatrix, MatrixLlmClient } from "../matrix/runner.js";
-import { MatrixAbort, SUITE_CONFIGS, getDefaultIMax, getCallsPerRun, getSuiteTasks } from "../matrix/types.js";
-import { calculateModelFullWorstCaseWithCallsPerRun, type PriceDataWithParams } from "../matrix/prices.js";
+import { MatrixAbort, SUITE_CONFIGS, getDefaultIMax, getCallsPerRun, getSuiteTasks, DEFAULT_MODELS } from "../matrix/types.js";
+import { calculateModelFullWorstCaseWithCallsPerRun, type PriceDataWithParams, type ModelPricing } from "../matrix/prices.js";
 import { runMain } from "../matrix.js";
 import { TASKS_V2 } from "../suite/index.js";
 import { PRELUDE_TIMEOUT_MS } from "../mcp/tools-v2.js";
@@ -196,7 +196,8 @@ describe("g production wiring", () => {
     }
   });
 
-  it("opus 0.2.0 worst case: 118 calls/run at iMax 4700 = ~$10.28 (flat 192 = ~$16.73)", () => {
+  it("opus 0.2.0 worst case (FIXTURE PRICES $12/$60 per M): 118 calls/run at iMax 4700 = ~$10.28 (flat 192 = ~$16.73)", () => {
+    // These are FIXTURE PRICES for test determinism, not real OpenRouter prices
     const opus = { modelId: "anthropic/claude-opus-5.5", promptPrice: 12 / 1_000_000, completionPrice: 60 / 1_000_000 };
     const iMax = getDefaultIMax("0.2.0", SUITE_CONFIGS["0.2.0"].maxSteps);
     expect(iMax).toBe(4700);
@@ -206,11 +207,47 @@ describe("g production wiring", () => {
     expect(calculateModelFullWorstCaseWithCallsPerRun(1, 16 * 12, iMax, opus)).toBeCloseTo(16.73, 2);
   });
 
-  it("runMain pre-flight uses 118 calls/run for 0.2.0: opus x 3 runs = $30.84 (flat would be $50.19)", async () => {
+  it("opus 0.2.0 worst case (REAL PRICES $4/$20 per M from 2026-10-17 snapshot): $3.43/run, $10.28/3 runs", () => {
+    // Real prices from openrouter-models-2026-10-17.json snapshot
+    const opus = { modelId: "anthropic/claude-opus-5.5", promptPrice: 4 / 1_000_000, completionPrice: 20 / 1_000_000 };
+    const iMax = getDefaultIMax("0.2.0", SUITE_CONFIGS["0.2.0"].maxSteps);
+    const callsPerRun = getCallsPerRun("0.2.0");
+    expect(iMax).toBe(4700);
+    expect(callsPerRun).toBe(118);
+    // Formula: callsPerRun * (iMax * promptPrice + 512 * completionPrice)
+    // = 118 * (4700 * 0.000004 + 512 * 0.00002)
+    // = 118 * (0.0188 + 0.01024) = 118 * 0.02904 = 3.42672
+    expect(calculateModelFullWorstCaseWithCallsPerRun(1, callsPerRun, iMax, opus)).toBeCloseTo(3.43, 2);
+    expect(calculateModelFullWorstCaseWithCallsPerRun(3, callsPerRun, iMax, opus)).toBeCloseTo(10.28, 2);
+  });
+
+  it("all 6 DEFAULT_MODELS x 3 runs worst case at REAL PRICES = $17.31", () => {
+    // Real prices from openrouter-models-2026-10-17.json snapshot
+    const realPrices: Record<string, ModelPricing> = {
+      "nex-agi/nex-n2.5-pro": { modelId: "nex-agi/nex-n2.5-pro", promptPrice: 0.075 / 1_000_000, completionPrice: 0.25 / 1_000_000 },
+      "openai/gpt-4o-mini": { modelId: "openai/gpt-4o-mini", promptPrice: 0.15 / 1_000_000, completionPrice: 0.6 / 1_000_000 },
+      "anthropic/claude-haiku-5.5": { modelId: "anthropic/claude-haiku-5.5", promptPrice: 0.1 / 1_000_000, completionPrice: 0.5 / 1_000_000 },
+      "mistralai/mistral-large-2512": { modelId: "mistralai/mistral-large-2512", promptPrice: 0.5 / 1_000_000, completionPrice: 1.5 / 1_000_000 },
+      "openai/gpt-6.1-sol": { modelId: "openai/gpt-6.1-sol", promptPrice: 2 / 1_000_000, completionPrice: 10 / 1_000_000 },
+      "anthropic/claude-opus-5.5": { modelId: "anthropic/claude-opus-5.5", promptPrice: 4 / 1_000_000, completionPrice: 20 / 1_000_000 },
+    };
+    const iMax = getDefaultIMax("0.2.0", SUITE_CONFIGS["0.2.0"].maxSteps);
+    const callsPerRun = getCallsPerRun("0.2.0");
+    let total = 0;
+    for (const model of DEFAULT_MODELS) {
+      const pricing = realPrices[model];
+      const worstCase = calculateModelFullWorstCaseWithCallsPerRun(3, callsPerRun, iMax, pricing);
+      total += worstCase;
+    }
+    expect(total).toBeCloseTo(17.31, 2);
+  });
+
+  it("runMain pre-flight uses 118 calls/run for 0.2.0: opus x 3 runs = $30.84 (FIXTURE PRICES)", async () => {
     const lines: string[] = [];
     vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => { lines.push(a.join(" ")); });
     vi.spyOn(console, "error").mockImplementation(() => {});
     const opus = "anthropic/claude-opus-5.5";
+    // FIXTURE PRICES for test determinism
     await runMain({
       argv: ["--suite", "0.2.0", "--models", opus, "--runs", "3", "--credit-usd", "1"],
       env: { OPENROUTER_API_KEY: "test-key-not-real" },
@@ -226,5 +263,148 @@ describe("g production wiring", () => {
 
   it("patch-check prelude timeout is 50 ms", () => {
     expect(PRELUDE_TIMEOUT_MS).toBe(50);
+  });
+
+  it("RETRY_DELAYS_MS rejects empty pieces like '1,,2'", () => {
+    expect(parseRetryDelaysEnv("1,,2")).toBeUndefined();
+    expect(parseRetryDelaysEnv("1,2,")).toBeUndefined();
+    expect(parseRetryDelaysEnv(",1,2")).toBeUndefined();
+    expect(parseRetryDelaysEnv("1,2,3")).toEqual([1, 2, 3]);
+    expect(parseRetryDelaysEnv("15000,60000,180000")).toEqual([15000, 60000, 180000]);
+  });
+
+  it("empty supported_parameters array is treated as not fetched", async () => {
+    liveEnv();
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_u: string, init: RequestInit) => { bodies.push(String(init.body)); return okJson(); }));
+    const { runs } = await runMatrix(
+      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      priceFor(["m/x"], { supportedParameters: new Map([["m/x", new Set()]]), parametersFetched: false }) as never,
+      { skipFileWrites: true },
+    );
+    for (const b of bodies) {
+      expect(JSON.parse(b)).toHaveProperty("temperature", 0);
+      expect(JSON.parse(b)).toHaveProperty("max_tokens");
+    }
+    expect(runs[0].parametersFetched).toBe(false);
+  });
+
+  it("max_tokens is never dropped even when not in supported_parameters", async () => {
+    liveEnv();
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_u: string, init: RequestInit) => { bodies.push(String(init.body)); return okJson(); }));
+    await runMatrix(
+      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      priceFor(["m/x"], { supportedParameters: new Map([["m/x", new Set(["temperature"])]]), parametersFetched: true }) as never,
+      { skipFileWrites: true },
+    );
+    for (const b of bodies) {
+      expect(JSON.parse(b)).toHaveProperty("max_tokens");
+    }
+  });
+
+  it("rate-limited model is excluded from pass and mean", async () => {
+    liveEnv();
+    const { runs } = await runMatrix(
+      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      priceFor(["m/x"]),
+      {
+        skipFileWrites: true,
+        llmClientFactory: (): LlmClient => ({
+          async complete(): Promise<LlmCompletionResponse> {
+            throw new RateLimitExhaustedError("m/x", 3);
+          },
+        }),
+      },
+    );
+    expect(runs.length).toBe(1);
+    expect(runs[0].abortReason).toBe("rate_limited");
+  });
+
+  it("http_errors aborted run is excluded from pass and mean", async () => {
+    liveEnv();
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({ error: { code: "overloaded" } }), { status: 200 })));
+    const { runs } = await runMatrix(
+      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      priceFor(["m/x"]),
+      { skipFileWrites: true },
+    );
+    expect(runs.length).toBe(1);
+    expect(runs[0].abortReason).toBe("http_errors");
+  });
+
+  it("temperatureSent is recorded per call when temperature is sent", async () => {
+    liveEnv();
+    vi.stubGlobal("fetch", vi.fn(async () => okJson()));
+    const { runs } = await runMatrix(
+      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      priceFor(["m/x"]),
+      { skipFileWrites: true },
+    );
+    expect(runs[0].calls.length).toBeGreaterThan(0);
+    for (const call of runs[0].calls) {
+      expect(call.temperatureSent).toBe(true);
+    }
+  });
+
+  it("temperatureSent is false when temperature is dropped", async () => {
+    liveEnv();
+    vi.stubGlobal("fetch", vi.fn(async () => okJson()));
+    const { runs } = await runMatrix(
+      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      priceFor(["m/x"], { supportedParameters: new Map([["m/x", new Set(["max_tokens"])]]), parametersFetched: true }) as never,
+      { skipFileWrites: true },
+    );
+    for (const call of runs[0].calls) {
+      expect(call.temperatureSent).toBe(false);
+    }
+  });
+
+  it("fresh-client test: a retry in task 2 checks task 2's budget (not task 1's)", async () => {
+    liveEnv();
+    let taskIdx = 0;
+    const callsPerTask: number[] = [];
+    const budgetCheckTaskCosts: number[] = [];
+
+    // Track budget checks - they should see the correct task's cost, not another task's
+    const originalCheckBudget = MatrixLlmClient.prototype.checkBudget;
+    vi.spyOn(MatrixLlmClient.prototype, "checkBudget").mockImplementation(function(this: MatrixLlmClient) {
+      const taskCostSoFar = (this as unknown as { config: { getTaskCostSoFar: () => number } }).config.getTaskCostSoFar();
+      budgetCheckTaskCosts.push(taskCostSoFar);
+      return originalCheckBudget.call(this);
+    });
+
+    vi.stubGlobal("fetch", vi.fn(async () => okJson()));
+
+    await runMatrix(
+      { suite: "0.1.0", models: ["m/x"], runs: 1, capUsd: 100, fixture: false },
+      priceFor(["m/x"]),
+      {
+        skipFileWrites: true,
+        llmClientFactory: (model: string) => {
+          const thisTask = taskIdx++;
+          let calls = 0;
+          return {
+            async complete(): Promise<LlmCompletionResponse> {
+              calls++;
+              callsPerTask[thisTask] = calls;
+              return { content: "Thought: d\nAction: finish\nAction Input: hello", model, usage: { promptTokens: 1, completionTokens: 1 } };
+            },
+          };
+        },
+      },
+    );
+
+    // Verify we created 7 separate clients (one per task) - this proves per-task isolation
+    expect(taskIdx).toBe(7);
+    // Each client was called once - if clients were reused this would be different
+    expect(callsPerTask.every((c) => c === 1)).toBe(true);
+    // Each budget check should see taskCostSoFar starting at 0 for each new task
+    // (not accumulated from previous tasks). This is the key assertion:
+    // if the factory reused clients, the budget would accumulate across tasks.
+    for (const cost of budgetCheckTaskCosts) {
+      expect(cost).toBe(0);
+    }
   });
 });

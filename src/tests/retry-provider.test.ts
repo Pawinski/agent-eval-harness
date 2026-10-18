@@ -361,12 +361,15 @@ describe("parameter filtering", () => {
 
     const body = JSON.parse(capturedBody);
     expect(body.temperature).toBe(0.5);
-    expect(body.max_tokens).toBeUndefined();
+    // max_tokens is NEVER dropped (cost math depends on it)
+    expect(body.max_tokens).toBe(100);
     expect(body.model).toBe("test/model");
     expect(body.messages).toBeDefined();
 
-    expect(result._meta?.droppedParameters).toContain("max_tokens");
-    expect(droppedParams[0]).toContain("max_tokens");
+    // max_tokens should not be in dropped params; droppedParameters may be undefined if nothing dropped
+    const dropped = result._meta?.droppedParameters ?? [];
+    expect(dropped).not.toContain("max_tokens");
+    expect(droppedParams.length).toBe(0); // Nothing dropped since temperature is supported and max_tokens is protected
   });
 
   it("keeps all parameters when model not in supported list", async () => {

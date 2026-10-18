@@ -32,6 +32,7 @@ export interface LlmCallMeta {
   retries?: number;
   droppedParameters?: string[];
   providerError?: { code?: string; type?: string };
+  temperatureSent?: boolean;
 }
 
 export interface LlmClient {
@@ -99,11 +100,14 @@ export class RateLimitExhaustedError extends Error {
   }
 }
 
-/** Parse RETRY_DELAYS_MS (comma-separated ms, e.g. "15000,60000,180000"); undefined if unset/invalid. */
+/** Parse RETRY_DELAYS_MS (comma-separated ms, e.g. "15000,60000,180000"); undefined if unset/invalid.
+ * Rejects empty pieces like "1,,2" or trailing commas. */
 export function parseRetryDelaysEnv(raw: string | undefined): number[] | undefined {
   if (!raw) return undefined;
-  const parts = raw.split(",").map((p) => Number(p.trim()));
-  if (parts.length === 0 || parts.some((n) => !Number.isFinite(n) || n < 0)) return undefined;
+  const pieces = raw.split(",");
+  if (pieces.length === 0 || pieces.some((p) => p.trim() === "")) return undefined;
+  const parts = pieces.map((p) => Number(p.trim()));
+  if (parts.some((n) => !Number.isFinite(n) || n < 0)) return undefined;
   return parts;
 }
 
@@ -243,7 +247,7 @@ export class OpenRouterClient implements LlmClient {
       max_tokens: req.maxTokens ?? this.defaultMaxTokens,
     };
 
-    const { body, droppedParameters } = this.filterParameters(rawBody, model);
+    const { body, droppedParameters, temperatureSent } = this.filterParameters(rawBody, model);
 
     const res = await fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
@@ -297,7 +301,7 @@ export class OpenRouterClient implements LlmClient {
     const content = json.choices[0]?.message?.content ?? "";
     const cachedTokens = parseCachedTokens(json.usage);
 
-    const _meta: LlmCallMeta = {};
+    const _meta: LlmCallMeta = { temperatureSent };
     if (droppedParameters.length > 0) {
       _meta.droppedParameters = droppedParameters;
       this.onDroppedParameters?.(model, droppedParameters);
@@ -312,28 +316,30 @@ export class OpenRouterClient implements LlmClient {
         ...(cachedTokens !== undefined ? { cachedTokens } : {}),
       },
       raw: json,
-      ...(Object.keys(_meta).length > 0 ? { _meta } : {}),
+      _meta,
     };
   }
 
   private filterParameters(
     body: Record<string, unknown>,
     model: string,
-  ): { body: Record<string, unknown>; droppedParameters: string[] } {
+  ): { body: Record<string, unknown>; droppedParameters: string[]; temperatureSent: boolean } {
+    const hasTemperature = "temperature" in body;
+
     if (!this.supportedParameters) {
-      return { body, droppedParameters: [] };
+      return { body, droppedParameters: [], temperatureSent: hasTemperature };
     }
 
     const supported = this.supportedParameters.get(model);
-    if (!supported) {
-      return { body, droppedParameters: [] };
+    if (!supported || supported.size === 0) {
+      return { body, droppedParameters: [], temperatureSent: hasTemperature };
     }
 
     const droppedParameters: string[] = [];
     const filtered: Record<string, unknown> = {};
 
     for (const [key, value] of Object.entries(body)) {
-      if (key === "model" || key === "messages") {
+      if (key === "model" || key === "messages" || key === "max_tokens") {
         filtered[key] = value;
       } else if (supported.has(key)) {
         filtered[key] = value;
@@ -342,7 +348,8 @@ export class OpenRouterClient implements LlmClient {
       }
     }
 
-    return { body: filtered, droppedParameters };
+    const temperatureSent = "temperature" in filtered;
+    return { body: filtered, droppedParameters, temperatureSent };
   }
 }
 

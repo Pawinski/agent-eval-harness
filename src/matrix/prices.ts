@@ -73,7 +73,7 @@ export async function fetchModelPricesWithParams(
       });
     }
 
-    if (model.supported_parameters && Array.isArray(model.supported_parameters)) {
+    if (model.supported_parameters && Array.isArray(model.supported_parameters) && model.supported_parameters.length > 0) {
       supportedParameters.set(model.id, new Set(model.supported_parameters));
       parametersFetched = true;
     }
