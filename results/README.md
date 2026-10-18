@@ -13,3 +13,5 @@ Each JSON file in `results/<suite>/` contains one eval run result with these fie
 - `tokens_cached`: integer or null; the total cached tokens, or null when the provider does not report cached tokens.
 - `cost_usd`: number ≥ 0; the estimated cost in USD, computed from list price (not billed).
 - `date`: string; the run date in YYYY-MM-DD format.
+
+Baseline row `0.1.0/4100fbb-nex-agi__nex-n2.5-pro-run1.json`: `cost_usd` computed at the 2026-10-17 OpenRouter list price ($0.075 per M input, $0.25 per M output): 4,721 × 0.075e-6 + 1,102 × 0.25e-6 = $0.00063. Not billed. Source: live run log 2026-10-04T18:37:51Z at 4100fbb.
