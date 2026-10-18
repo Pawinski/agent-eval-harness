@@ -653,6 +653,7 @@ export async function runMatrix(
         if (taskResult.abortReason) {
           if (taskResult.abortReason === "global_cap") {
             globalAbort = true;
+            modelAbortReason = "global_cap";
             callbacks?.onGlobalAbort?.();
           } else if (taskResult.abortReason === "rate_limited") {
             modelAbortReason = "rate_limited";
@@ -761,7 +762,7 @@ export async function runMatrix(
       }
     }
 
-    if (modelAbortReason && modelAbortReason !== "global_cap") {
+    if (modelAbortReason && modelAbortReason !== "global_cap" && modelAbortReason !== "rate_limited") {
       callbacks?.onModelAbort?.(modelId, modelAbortReason);
     }
   }

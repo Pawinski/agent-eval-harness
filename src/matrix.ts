@@ -12,6 +12,7 @@ import { realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { PROJECT_NAME } from "./name.js";
+import { parseRetryDelaysEnv } from "./llm/index.js";
 import { runPreflight } from "./mcp/index.js";
 import {
   fetchModelPricesWithParams,
@@ -195,6 +196,7 @@ interface ModelStats {
   totalCached: number | null;
   totalEmpty: number;
   abortedRuns: number;
+  tempSent: boolean | "mixed" | null;
 }
 
 function computeModelStats(runs: RunResult[]): Map<string, ModelStats> {
@@ -222,7 +224,14 @@ function computeModelStats(runs: RunResult[]): Map<string, ModelStats> {
         totalCached = (totalCached ?? 0) + r.tokensCached;
       }
     }
-    stats.set(model, { passes, mean, spread, totalCost, totalIn, totalOut, totalCached, totalEmpty, abortedRuns });
+    const tempValues = new Set(modelRuns.map((r) => r.temperatureSent).filter((v): v is boolean => typeof v === "boolean"));
+    let tempSent: boolean | "mixed" | null = null;
+    if (tempValues.size === 1) {
+      tempSent = tempValues.has(true);
+    } else if (tempValues.size > 1) {
+      tempSent = "mixed";
+    }
+    stats.set(model, { passes, mean, spread, totalCost, totalIn, totalOut, totalCached, totalEmpty, abortedRuns, tempSent });
   }
 
   return stats;
@@ -236,8 +245,8 @@ function printSummaryToConsole(runs: RunResult[], suite: string, capUsd: number,
 
   const stats = computeModelStats(runs);
   console.log("\n--- Per-Model Summary ---");
-  console.log("| Model | Runs | Mean | Spread | Total In | Total Out | Cached | Empty | Total Cost | Status |");
-  console.log("|-------|------|------|--------|----------|-----------|--------|-------|------------|--------|");
+  console.log("| Model | Runs | Mean | Spread | Total In | Total Out | Cached | Empty | Total Cost | Status | Temp sent |");
+  console.log("|-------|------|------|--------|----------|-----------|--------|-------|------------|--------|-----------|");
 
   for (const [model, s] of stats) {
     let passStr: string;
@@ -254,14 +263,15 @@ function printSummaryToConsole(runs: RunResult[], suite: string, capUsd: number,
     }
     const cached = s.totalCached !== null ? String(s.totalCached) : "-";
     const status = s.abortedRuns > 0 ? `${s.abortedRuns} aborted` : "-";
+    const temp = s.tempSent === true ? "yes" : s.tempSent === false ? "no" : s.tempSent === "mixed" ? "mixed" : "-";
     console.log(
-      `| ${model} | ${passStr} | ${meanStr} | ${spreadStr} | ${s.totalIn} | ${s.totalOut} | ${cached} | ${s.totalEmpty} | $${s.totalCost.toFixed(6)} | ${status} |`,
+      `| ${model} | ${passStr} | ${meanStr} | ${spreadStr} | ${s.totalIn} | ${s.totalOut} | ${cached} | ${s.totalEmpty} | $${s.totalCost.toFixed(6)} | ${status} | ${temp} |`,
     );
   }
 
   for (const skipped of skippedModels) {
     console.log(
-      `| ${skipped.model} | - | - | - | - | - | - | - | - | skipped: ${skipped.reason} |`,
+      `| ${skipped.model} | - | - | - | - | - | - | - | - | skipped: ${skipped.reason} | - |`,
     );
   }
 }
@@ -431,6 +441,15 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
       console.error(`Error: ${err}`);
     }
     return 1;
+  }
+
+  const retryDelaysRaw = env.RETRY_DELAYS_MS;
+  if (retryDelaysRaw !== undefined && retryDelaysRaw !== "") {
+    const parsed = parseRetryDelaysEnv(retryDelaysRaw);
+    if (!parsed) {
+      console.error(`Error: RETRY_DELAYS_MS is invalid (must be comma-separated positive integers, no empty pieces).`);
+      return 1;
+    }
   }
 
   let tasks;

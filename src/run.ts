@@ -11,7 +11,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReactAgent } from "./agent/react.js";
-import { createLlmClient, OpenRouterClient } from "./llm/index.js";
+import { createLlmClient, OpenRouterClient, parseRetryDelaysEnv } from "./llm/index.js";
 import { PROJECT_NAME } from "./name.js";
 import { fetchModelPricesWithParams } from "./matrix/prices.js";
 import {
@@ -212,6 +212,15 @@ async function main(): Promise<void> {
 
   if (suiteVersion === "0.2.0") {
     runPreflight();
+  }
+
+  const retryDelaysRaw = process.env.RETRY_DELAYS_MS;
+  if (retryDelaysRaw !== undefined && retryDelaysRaw !== "") {
+    const parsed = parseRetryDelaysEnv(retryDelaysRaw);
+    if (!parsed) {
+      console.error(`Error: RETRY_DELAYS_MS is invalid (must be comma-separated positive integers, no empty pieces).`);
+      process.exit(1);
+    }
   }
 
   const tasks = args.taskId

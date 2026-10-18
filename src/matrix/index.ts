@@ -26,6 +26,7 @@ export {
   getTodayDate,
   getResultsDir,
   checkGitStatus,
+  summarizeTemperatureSent,
   MAX_COMPLETION_TOKENS,
   MatrixLlmClient,
   type MatrixLlmClientConfig,

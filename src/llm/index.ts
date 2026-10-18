@@ -2,6 +2,7 @@ export {
   createLlmClient,
   OpenRouterClient,
   parseCachedTokens,
+  parseRetryDelaysEnv,
   ProviderError,
   RateLimitExhaustedError,
   DEFAULT_RETRY_DELAYS,

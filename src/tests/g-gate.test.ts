@@ -32,9 +32,9 @@ vi.mock("../llm/index.js", async (orig) => {
 });
 
 import { runMain } from "../matrix.js";
-import { runMatrix } from "../matrix/runner.js";
+import { runMatrix, MatrixLlmClient, summarizeTemperatureSent } from "../matrix/runner.js";
 import { fetchModelPricesWithParams } from "../matrix/prices.js";
-import { getSuiteTasks } from "../matrix/types.js";
+import { getSuiteTasks, MatrixAbort } from "../matrix/types.js";
 
 const ok = () =>
   new Response(
@@ -164,5 +164,124 @@ describe("g gate: real matrix with scripted fetch", () => {
     expect(code).toBe(1); // no pricing for a/a in the empty list
     expect(seen.map((s) => s.url)).toEqual(["http://mock.invalid/custom/v1/models"]);
     expect(JSON.stringify(seen[0].init?.headers ?? {})).not.toMatch(/authorization/i);
+  });
+
+  it("global_cap aborted run gets no scored file, only _meta with abortReason, excluded from pass/mean", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ok()));
+    let budgetCheckCount = 0;
+    vi.spyOn(MatrixLlmClient.prototype, "checkBudget").mockImplementation(function () {
+      budgetCheckCount++;
+      if (budgetCheckCount === 4) {
+        throw new MatrixAbort("global_cap", "cap exceeded");
+      }
+    });
+    const lines: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => { lines.push(a.join(" ")); });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const models = ["nex-agi/nex", "openai/4o-mini"];
+    const code = await runMain({
+      argv: ["--suite", "0.1.0", "--models", models.join(","), "--runs", "1", "--credit-usd", "100", "--cap-usd", "50"],
+      env: process.env,
+      getGitStatus: () => ({ sha: "0".repeat(40), isDirty: false }),
+      skipPricesFetch: true,
+      priceData: {
+        fetchedAt: "t",
+        models: new Map(models.map((m) => [m, tiny(m)])),
+      } as never,
+    });
+    expect(code).toBe(1);
+
+    const files = [...written.keys()];
+    const scoredNex = files.filter((f) => /[\\/]0\.1\.0[\\/][0-9a-f]{7}-nex-agi__nex-run\d\.json$/.test(f));
+    const metaNex = files.filter((f) => /_meta[\\/][0-9a-f]{7}-nex-agi__nex-run\d\.json$/.test(f)).map((f) => JSON.parse(written.get(f)!));
+    expect(scoredNex).toEqual([]);
+    expect(metaNex.length).toBe(1);
+    expect(metaNex[0].abortReason).toBe("global_cap");
+
+    const summaryPath = files.find((f) => /_summary-[0-9a-f]{7}-.*\.json$/.test(f))!;
+    const summary = JSON.parse(written.get(summaryPath)!);
+    expect(summary.modelSummaries["nex-agi/nex"]).toMatchObject({ passes: [], mean: null, spread: null, abortedRuns: 1 });
+    expect(summary.runs.find((r: { model: string }) => r.model === "nex-agi/nex").abort_reason).toBe("global_cap");
+
+    const output = lines.join("\n");
+    expect(output).toContain("| nex-agi/nex | 1 | not scored (global_cap) |");
+    expect(output).toContain("GLOBAL CAP REACHED");
+  });
+
+  it("mixed temperatureSent: some calls sent temperature, some did not", async () => {
+    const calls = [
+      { taskId: "t1", step: 1, usage: { promptTokens: 1, completionTokens: 1, cachedTokens: null, costUsd: 0 }, empty: false, httpError: false, temperatureSent: true },
+      { taskId: "t2", step: 1, usage: { promptTokens: 1, completionTokens: 1, cachedTokens: null, costUsd: 0 }, empty: false, httpError: false, temperatureSent: false },
+      { taskId: "t3", step: 1, usage: { promptTokens: 1, completionTokens: 1, cachedTokens: null, costUsd: 0 }, empty: false, httpError: false, temperatureSent: true },
+    ];
+    expect(summarizeTemperatureSent(calls)).toBe("mixed");
+    expect(summarizeTemperatureSent([calls[0], calls[2]])).toBe(true);
+    expect(summarizeTemperatureSent([calls[1]])).toBe(false);
+    expect(summarizeTemperatureSent([])).toBe(null);
+  });
+
+  it("mixed temperatureSent end-to-end: different supported_parameters per model in same matrix", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ok()));
+    const models = ["a/a", "b/b"];
+    const { runs } = await runMatrix(
+      { suite: "0.1.0", models, runs: 1, capUsd: 100, fixture: false },
+      {
+        fetchedAt: "t",
+        models: new Map(models.map((m) => [m, tiny(m)])),
+        supportedParameters: new Map([["b/b", new Set(["max_tokens"])]]),
+        parametersFetched: true,
+      } as never,
+      { skipFileWrites: true },
+    );
+    expect(runs[0].temperatureSent).toBe(true);
+    expect(runs[1].temperatureSent).toBe(false);
+  });
+
+  it("invalid RETRY_DELAYS_MS (empty piece) exits 1 with clear error naming the variable", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const errors: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => { errors.push(a.join(" ")); });
+    const code = await runMain({
+      argv: ["--suite", "0.1.0", "--models", "a/a", "--runs", "1", "--credit-usd", "1"],
+      env: { OPENROUTER_API_KEY: "test-key-not-real", RETRY_DELAYS_MS: "1,,2" },
+      getGitStatus: () => ({ sha: "0".repeat(40), isDirty: false }),
+      skipPricesFetch: true,
+      priceData: { fetchedAt: "t", models: new Map([["a/a", tiny("a/a")]]) } as never,
+      skipFileWrites: true,
+    });
+    expect(code).toBe(1);
+    expect(errors.some((e) => e.includes("RETRY_DELAYS_MS") && e.includes("invalid"))).toBe(true);
+  });
+
+  it("invalid RETRY_DELAYS_MS (non-numeric) exits 1 with clear error", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const errors: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => { errors.push(a.join(" ")); });
+    const code = await runMain({
+      argv: ["--suite", "0.1.0", "--models", "a/a", "--runs", "1", "--credit-usd", "1"],
+      env: { OPENROUTER_API_KEY: "test-key-not-real", RETRY_DELAYS_MS: "abc,def" },
+      getGitStatus: () => ({ sha: "0".repeat(40), isDirty: false }),
+      skipPricesFetch: true,
+      priceData: { fetchedAt: "t", models: new Map([["a/a", tiny("a/a")]]) } as never,
+      skipFileWrites: true,
+    });
+    expect(code).toBe(1);
+    expect(errors.some((e) => e.includes("RETRY_DELAYS_MS") && e.includes("invalid"))).toBe(true);
+  });
+
+  it("invalid RETRY_DELAYS_MS (negative) exits 1 with clear error", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const errors: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => { errors.push(a.join(" ")); });
+    const code = await runMain({
+      argv: ["--suite", "0.1.0", "--models", "a/a", "--runs", "1", "--credit-usd", "1"],
+      env: { OPENROUTER_API_KEY: "test-key-not-real", RETRY_DELAYS_MS: "1000,-500,2000" },
+      getGitStatus: () => ({ sha: "0".repeat(40), isDirty: false }),
+      skipPricesFetch: true,
+      priceData: { fetchedAt: "t", models: new Map([["a/a", tiny("a/a")]]) } as never,
+      skipFileWrites: true,
+    });
+    expect(code).toBe(1);
+    expect(errors.some((e) => e.includes("RETRY_DELAYS_MS") && e.includes("invalid"))).toBe(true);
   });
 });
