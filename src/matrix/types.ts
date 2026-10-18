@@ -2,10 +2,36 @@
  * Types for the multi-model matrix runner.
  */
 
+import { TASKS, type SuiteTask } from "../suite/index.js";
+
 export interface ModelPricing {
   modelId: string;
   promptPrice: number;
   completionPrice: number;
+}
+
+export type AbortReason =
+  | "cost_exceeded"
+  | "completion_tokens_exceeded"
+  | "prompt_tokens_exceeded"
+  | "http_errors"
+  | "global_cap";
+
+export class MatrixAbort extends Error {
+  readonly reason: AbortReason;
+
+  constructor(reason: AbortReason, message?: string) {
+    super(message ?? `Matrix abort: ${reason}`);
+    this.name = "MatrixAbort";
+    this.reason = reason;
+  }
+}
+
+export function getSuiteTasks(version: string): SuiteTask[] {
+  if (version === "0.1.0") {
+    return TASKS;
+  }
+  throw new Error(`Unknown suite version: ${version}`);
 }
 
 export interface PriceData {
@@ -91,13 +117,6 @@ export interface CallResult {
   empty: boolean;
   httpError: boolean;
 }
-
-export type AbortReason =
-  | "cost_exceeded"
-  | "completion_tokens_exceeded"
-  | "prompt_tokens_exceeded"
-  | "http_errors"
-  | "global_cap";
 
 export interface RunResult {
   model: string;

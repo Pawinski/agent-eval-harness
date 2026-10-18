@@ -17,6 +17,9 @@ export {
   getGitSha7,
   sanitizeModelId,
   getTodayDate,
+  MAX_COMPLETION_TOKENS,
+  MatrixLlmClient,
+  type MatrixLlmClientConfig,
   type MatrixRunnerCallbacks,
 } from "./runner.js";
 
@@ -30,6 +33,7 @@ export {
   type AbortReason,
   type RunResult,
   type ResultRow,
+  MatrixAbort,
   SUITE_CONFIGS,
   DEFAULT_MODELS,
   DEFAULT_SUITE,
@@ -38,6 +42,7 @@ export {
   getDefaultCapUsd,
   getDefaultIMax,
   getDefaultMaxInputTokens,
+  getSuiteTasks,
 } from "./types.js";
 
 export {

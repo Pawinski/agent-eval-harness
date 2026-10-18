@@ -12,7 +12,12 @@ import {
   type PriceData,
   getDefaultCapUsd,
   getDefaultIMax,
+  getDefaultMaxInputTokens,
+  getSuiteTasks,
   SUITE_CONFIGS,
+  MatrixAbort,
+  MatrixLlmClient,
+  MAX_COMPLETION_TOKENS,
 } from "../matrix/index.js";
 import {
   registerSensitiveValue,
@@ -22,6 +27,7 @@ import {
   redactError,
   safeStringify,
 } from "../matrix/redact.js";
+import type { LlmClient, LlmCompletionResponse } from "../llm/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -94,12 +100,8 @@ describe("abort rules", () => {
   });
 
   describe("rule b: completion tokens exceeded", () => {
-    it("threshold is 512 completion tokens", () => {
-      const MAX_COMPLETION_TOKENS = 512;
+    it("MAX_COMPLETION_TOKENS constant is 512", () => {
       expect(MAX_COMPLETION_TOKENS).toBe(512);
-
-      expect(513 > MAX_COMPLETION_TOKENS).toBe(true);
-      expect(512 > MAX_COMPLETION_TOKENS).toBe(false);
     });
   });
 
@@ -109,19 +111,44 @@ describe("abort rules", () => {
       expect(config.maxInputTokens).toBe(3000);
     });
 
-    it("default for maxSteps 12 is 4700", () => {
-      expect(4700).toBe(4700);
+    it("getDefaultMaxInputTokens returns 4700 for maxSteps 12", () => {
+      expect(getDefaultMaxInputTokens(12)).toBe(4700);
+    });
+
+    it("getDefaultMaxInputTokens returns 3750 for other maxSteps", () => {
+      expect(getDefaultMaxInputTokens(8)).toBe(3750);
     });
   });
 
   describe("rule d: HTTP errors", () => {
-    it("triggers on 2 or more HTTP errors in one run", () => {
-      const httpErrors = 2;
-      expect(httpErrors >= 2).toBe(true);
-
-      const oneError = 1;
-      expect(oneError >= 2).toBe(false);
+    it("two failing tasks trigger abort", () => {
+      const tasksWithHttpErrors = 2;
+      expect(tasksWithHttpErrors >= 2).toBe(true);
     });
+
+    it("one failing task does not trigger abort", () => {
+      const tasksWithHttpErrors = 1;
+      expect(tasksWithHttpErrors >= 2).toBe(false);
+    });
+  });
+});
+
+describe("suite tasks", () => {
+  it("getSuiteTasks returns tasks for 0.1.0", () => {
+    const tasks = getSuiteTasks("0.1.0");
+    expect(tasks.length).toBe(7);
+  });
+
+  it("getSuiteTasks throws for unknown suite", () => {
+    expect(() => getSuiteTasks("unknown")).toThrow("Unknown suite version");
+  });
+
+  it("getDefaultIMax returns 2410 for 0.1.0", () => {
+    expect(getDefaultIMax("0.1.0", 8)).toBe(2410);
+  });
+
+  it("getDefaultIMax returns 3750 for maxSteps 12", () => {
+    expect(getDefaultIMax("0.2.0", 12)).toBe(3750);
   });
 });
 
@@ -212,6 +239,190 @@ describe("model sorting", () => {
     expect(sorted[0]).toBe("cheap");
     expect(sorted[1]).toBe("medium");
     expect(sorted[2]).toBe("expensive");
+  });
+});
+
+describe("per-call enforcement", () => {
+  function createMockLlm(responses: Array<{ promptTokens: number; completionTokens: number }>): LlmClient & { callCount: number } {
+    let idx = 0;
+    return {
+      callCount: 0,
+      async complete(): Promise<LlmCompletionResponse> {
+        this.callCount++;
+        const resp = responses[idx] ?? responses[responses.length - 1];
+        idx++;
+        return {
+          content: "Thought: done\nAction: finish\nAction Input: test",
+          model: "mock",
+          usage: {
+            promptTokens: resp.promptTokens,
+            completionTokens: resp.completionTokens,
+          },
+        };
+      },
+    };
+  }
+
+  const pricing: ModelPricing = {
+    modelId: "test/model",
+    promptPrice: 0.001,
+    completionPrice: 0.001,
+  };
+
+  it("throws MatrixAbort on completion tokens exceeded after call", async () => {
+    const mockLlm = createMockLlm([{ promptTokens: 100, completionTokens: 600 }]);
+    const wrappedLlm = new MatrixLlmClient(mockLlm, {
+      pricing,
+      maxInputTokens: 3000,
+      iMax: 2410,
+      globalCapUsd: 100,
+      worstCasePerRun: 100,
+      getCumulativeCost: () => 0,
+      getRunCostSoFar: () => 0,
+      getTaskCostSoFar: () => 0,
+      onCall: () => {},
+    });
+
+    try {
+      await wrappedLlm.complete({ messages: [] });
+      expect.fail("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(MatrixAbort);
+      expect((err as MatrixAbort).reason).toBe("completion_tokens_exceeded");
+    }
+    expect(mockLlm.callCount).toBe(1);
+  });
+
+  it("throws MatrixAbort on prompt tokens exceeded after call", async () => {
+    const mockLlm = createMockLlm([{ promptTokens: 4000, completionTokens: 100 }]);
+    const wrappedLlm = new MatrixLlmClient(mockLlm, {
+      pricing,
+      maxInputTokens: 3000,
+      iMax: 2410,
+      globalCapUsd: 100,
+      worstCasePerRun: 100,
+      getCumulativeCost: () => 0,
+      getRunCostSoFar: () => 0,
+      getTaskCostSoFar: () => 0,
+      onCall: () => {},
+    });
+
+    try {
+      await wrappedLlm.complete({ messages: [] });
+      expect.fail("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(MatrixAbort);
+      expect((err as MatrixAbort).reason).toBe("prompt_tokens_exceeded");
+    }
+    expect(mockLlm.callCount).toBe(1);
+  });
+
+  it("throws MatrixAbort before call when global cap would be exceeded", async () => {
+    const mockLlm = createMockLlm([{ promptTokens: 100, completionTokens: 100 }]);
+    const wrappedLlm = new MatrixLlmClient(mockLlm, {
+      pricing,
+      maxInputTokens: 3000,
+      iMax: 2410,
+      globalCapUsd: 0.001,
+      worstCasePerRun: 100,
+      getCumulativeCost: () => 0,
+      getRunCostSoFar: () => 0,
+      getTaskCostSoFar: () => 0,
+      onCall: () => {},
+    });
+
+    try {
+      await wrappedLlm.complete({ messages: [] });
+      expect.fail("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(MatrixAbort);
+      expect((err as MatrixAbort).reason).toBe("global_cap");
+    }
+    expect(mockLlm.callCount).toBe(0);
+  });
+
+  it("throws MatrixAbort before call when run cost would exceed worst case", async () => {
+    const mockLlm = createMockLlm([{ promptTokens: 100, completionTokens: 100 }]);
+    const wrappedLlm = new MatrixLlmClient(mockLlm, {
+      pricing,
+      maxInputTokens: 3000,
+      iMax: 2410,
+      globalCapUsd: 100,
+      worstCasePerRun: 0.001,
+      getCumulativeCost: () => 0,
+      getRunCostSoFar: () => 0,
+      getTaskCostSoFar: () => 0,
+      onCall: () => {},
+    });
+
+    try {
+      await wrappedLlm.complete({ messages: [] });
+      expect.fail("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(MatrixAbort);
+      expect((err as MatrixAbort).reason).toBe("cost_exceeded");
+    }
+    expect(mockLlm.callCount).toBe(0);
+  });
+
+  it("no call is made after global cap trip", async () => {
+    const mockLlm = createMockLlm([{ promptTokens: 100, completionTokens: 100 }]);
+    let taskCost = 0;
+    const wrappedLlm = new MatrixLlmClient(mockLlm, {
+      pricing,
+      maxInputTokens: 3000,
+      iMax: 2410,
+      globalCapUsd: 0.0001,
+      worstCasePerRun: 100,
+      getCumulativeCost: () => 0,
+      getRunCostSoFar: () => 0,
+      getTaskCostSoFar: () => taskCost,
+      onCall: (usage) => { taskCost += usage.costUsd; },
+    });
+
+    try {
+      await wrappedLlm.complete({ messages: [] });
+    } catch {
+      // Expected
+    }
+
+    const callsBefore = mockLlm.callCount;
+
+    try {
+      await wrappedLlm.complete({ messages: [] });
+    } catch {
+      // Expected
+    }
+
+    expect(mockLlm.callCount).toBe(callsBefore);
+  });
+
+  it("no call is made after completion token trip - tripping call is the last", async () => {
+    const mockLlm = createMockLlm([
+      { promptTokens: 100, completionTokens: 100 },
+      { promptTokens: 100, completionTokens: 600 },
+    ]);
+    const wrappedLlm = new MatrixLlmClient(mockLlm, {
+      pricing,
+      maxInputTokens: 3000,
+      iMax: 2410,
+      globalCapUsd: 100,
+      worstCasePerRun: 100,
+      getCumulativeCost: () => 0,
+      getRunCostSoFar: () => 0,
+      getTaskCostSoFar: () => 0,
+      onCall: () => {},
+    });
+
+    await wrappedLlm.complete({ messages: [] });
+    expect(mockLlm.callCount).toBe(1);
+
+    try {
+      await wrappedLlm.complete({ messages: [] });
+    } catch {
+      // Expected - completion tokens exceeded
+    }
+    expect(mockLlm.callCount).toBe(2);
   });
 });
 

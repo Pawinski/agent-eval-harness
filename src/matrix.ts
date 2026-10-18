@@ -27,10 +27,10 @@ import {
   DEFAULT_RUNS,
   SUITE_CONFIGS,
   getDefaultCapUsd,
+  getSuiteTasks,
   type RunResult,
   type PriceData,
 } from "./matrix/index.js";
-import { TASKS } from "./suite/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -146,9 +146,9 @@ function computeModelStats(runs: RunResult[]): Map<string, { passes: number[]; m
   return stats;
 }
 
-function printSummaryToConsole(runs: RunResult[], suite: string, capUsd: number): void {
+function printSummaryToConsole(runs: RunResult[], suite: string, capUsd: number, taskCount: number): void {
   console.log("\n=== Matrix Summary ===");
-  console.log(`Suite: ${suite} | Cap: $${capUsd.toFixed(2)} | Tasks: ${TASKS.length}`);
+  console.log(`Suite: ${suite} | Cap: $${capUsd.toFixed(2)} | Tasks: ${taskCount}`);
   console.log("");
   console.log(formatSummaryTable(runs));
 
@@ -158,7 +158,7 @@ function printSummaryToConsole(runs: RunResult[], suite: string, capUsd: number)
   console.log("|-------|------|------|--------|----------|-----------|--------|------------|");
 
   for (const [model, s] of stats) {
-    const passStr = s.passes.map((p) => `${p}/${TASKS.length}`).join(", ");
+    const passStr = s.passes.map((p) => `${p}/${taskCount}`).join(", ");
     const cached = s.totalCached !== null ? String(s.totalCached) : "-";
     console.log(
       `| ${model} | ${passStr} | ${s.mean.toFixed(2)} | ${s.spread} | ${s.totalIn} | ${s.totalOut} | ${cached} | $${s.totalCost.toFixed(6)} |`,
@@ -172,6 +172,7 @@ async function writeSummaryFiles(
   priceData: PriceData,
   capUsd: number,
   globalAbort: boolean,
+  taskCount: number,
 ): Promise<{ jsonPath: string; mdPath: string }> {
   const sha7 = getGitSha7();
   const date = getTodayDate();
@@ -203,7 +204,7 @@ async function writeSummaryFiles(
     capUsd,
     globalAbort,
     pricesFetchedAt: priceData.fetchedAt,
-    taskCount: TASKS.length,
+    taskCount,
     runs: runs.map((r) => ({
       model: r.model,
       run_n: r.runN,
@@ -227,7 +228,7 @@ async function writeSummaryFiles(
   mdLines.push(`- **SHA**: ${sha7}`);
   mdLines.push(`- **Date**: ${date}`);
   mdLines.push(`- **Cap**: $${capUsd.toFixed(2)}`);
-  mdLines.push(`- **Tasks**: ${TASKS.length}`);
+  mdLines.push(`- **Tasks**: ${taskCount}`);
   mdLines.push(`- **Global Abort**: ${globalAbort ? "Yes" : "No"}`);
   mdLines.push("");
   mdLines.push("## Per-Run Results");
@@ -240,7 +241,7 @@ async function writeSummaryFiles(
   mdLines.push("|-------|------|------|--------|------------|");
 
   for (const [model, s] of stats) {
-    const passStr = s.passes.map((p) => `${p}/${TASKS.length}`).join(", ");
+    const passStr = s.passes.map((p) => `${p}/${taskCount}`).join(", ");
     mdLines.push(`| ${model} | ${passStr} | ${s.mean.toFixed(2)} | ${s.spread} | $${s.totalCost.toFixed(6)} |`);
   }
 
@@ -257,7 +258,10 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  if (!(args.suite in SUITE_CONFIGS)) {
+  let tasks;
+  try {
+    tasks = getSuiteTasks(args.suite);
+  } catch {
     console.error(`Error: Suite "${args.suite}" does not exist yet.`);
     console.error(`Available suites: ${Object.keys(SUITE_CONFIGS).join(", ")}`);
     process.exit(1);
@@ -349,9 +353,9 @@ async function main(): Promise<void> {
     console.log("\n*** Matrix halted due to global cost cap ***");
   }
 
-  printSummaryToConsole(runs, args.suite, capUsd);
+  printSummaryToConsole(runs, args.suite, capUsd, tasks.length);
 
-  const { jsonPath, mdPath } = await writeSummaryFiles(runs, args.suite, priceData, capUsd, globalAbort);
+  const { jsonPath, mdPath } = await writeSummaryFiles(runs, args.suite, priceData, capUsd, globalAbort, tasks.length);
 
   console.log("\n--- Output Files ---");
   console.log(`Summary JSON: ${jsonPath}`);

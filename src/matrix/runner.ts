@@ -1,6 +1,6 @@
 /**
  * Matrix runner: run eval loop per model and per run, sequentially.
- * Implements abort rules and cost tracking.
+ * Implements abort rules and cost tracking with per-call enforcement.
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
@@ -14,7 +14,7 @@ import {
   type LlmCompletionResponse,
 } from "../llm/index.js";
 import { createDefaultMcpClient } from "../mcp/index.js";
-import { TASKS, runCheck, type SuiteTask } from "../suite/index.js";
+import { runCheck, type SuiteTask } from "../suite/index.js";
 import {
   calculateCallCost,
   calculateWorstCaseCost,
@@ -27,17 +27,19 @@ import {
   type MatrixRunConfig,
   type ResultRow,
   type RunResult,
+  MatrixAbort,
   SUITE_CONFIGS,
   getDefaultIMax,
   getDefaultMaxInputTokens,
+  getSuiteTasks,
 } from "./types.js";
-import { redactError, safeStringify } from "./redact.js";
+import { safeStringify } from "./redact.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "../..");
 const RESULTS_DIR = path.join(ROOT, "results");
 
-const MAX_COMPLETION_TOKENS = 512;
+export const MAX_COMPLETION_TOKENS = 512;
 
 export function getGitSha(): string {
   try {
@@ -70,7 +72,7 @@ interface TaskRunResult {
   tokensCached: number | null;
   costUsd: number;
   empty: boolean;
-  httpErrors: number;
+  hadHttpError: boolean;
   calls: CallResult[];
   abortReason?: AbortReason;
 }
@@ -91,42 +93,72 @@ function isEmptyAnswer(answer: string): boolean {
   return !answer || !answer.trim();
 }
 
-class MatrixLlmClient implements LlmClient {
-  private readonly inner: LlmClient;
-  private readonly pricing: ModelPricing;
-  private readonly onCall: (usage: {
+export interface MatrixLlmClientConfig {
+  pricing: ModelPricing;
+  maxInputTokens: number;
+  iMax: number;
+  globalCapUsd?: number;
+  worstCasePerRun: number;
+  getCumulativeCost: () => number;
+  getRunCostSoFar: () => number;
+  getTaskCostSoFar: () => number;
+  onCall: (usage: {
     promptTokens: number;
     completionTokens: number;
     cachedTokens: number | null;
     costUsd: number;
   }) => void;
+}
 
-  constructor(
-    inner: LlmClient,
-    pricing: ModelPricing,
-    onCall: (usage: {
-      promptTokens: number;
-      completionTokens: number;
-      cachedTokens: number | null;
-      costUsd: number;
-    }) => void,
-  ) {
+export class MatrixLlmClient implements LlmClient {
+  private readonly inner: LlmClient;
+  private readonly config: MatrixLlmClientConfig;
+  public callCount = 0;
+
+  constructor(inner: LlmClient, config: MatrixLlmClientConfig) {
     this.inner = inner;
-    this.pricing = pricing;
-    this.onCall = onCall;
+    this.config = config;
   }
 
   async complete(
     req: Parameters<LlmClient["complete"]>[0],
   ): Promise<LlmCompletionResponse> {
+    const { pricing, maxInputTokens, iMax, globalCapUsd, worstCasePerRun } = this.config;
+    const cumulativeCost = this.config.getCumulativeCost();
+    const runCostSoFar = this.config.getRunCostSoFar();
+    const taskCostSoFar = this.config.getTaskCostSoFar();
+
+    const oneCallWorstCase = calculateWorstCaseCost(1, iMax, MAX_COMPLETION_TOKENS, pricing);
+
+    if (globalCapUsd !== undefined) {
+      const projectedTotal = cumulativeCost + runCostSoFar + taskCostSoFar + oneCallWorstCase;
+      if (projectedTotal > globalCapUsd) {
+        throw new MatrixAbort("global_cap", `Global cap would be exceeded: $${projectedTotal.toFixed(6)} > $${globalCapUsd}`);
+      }
+    }
+
+    const projectedRunCost = runCostSoFar + taskCostSoFar + oneCallWorstCase;
+    if (projectedRunCost > worstCasePerRun) {
+      throw new MatrixAbort("cost_exceeded", `Run cost would exceed worst case: $${projectedRunCost.toFixed(6)} > $${worstCasePerRun.toFixed(6)}`);
+    }
+
     const result = await this.inner.complete(req);
+    this.callCount++;
 
     const promptTokens = result.usage?.promptTokens ?? 0;
     const completionTokens = result.usage?.completionTokens ?? 0;
     const cachedTokens = result.usage?.cachedTokens ?? null;
-    const costUsd = calculateCallCost(promptTokens, completionTokens, this.pricing);
+    const costUsd = calculateCallCost(promptTokens, completionTokens, pricing);
 
-    this.onCall({ promptTokens, completionTokens, cachedTokens, costUsd });
+    this.config.onCall({ promptTokens, completionTokens, cachedTokens, costUsd });
+
+    if (completionTokens > MAX_COMPLETION_TOKENS) {
+      throw new MatrixAbort("completion_tokens_exceeded", `Completion tokens exceeded: ${completionTokens} > ${MAX_COMPLETION_TOKENS}`);
+    }
+
+    if (promptTokens > maxInputTokens) {
+      throw new MatrixAbort("prompt_tokens_exceeded", `Prompt tokens exceeded: ${promptTokens} > ${maxInputTokens}`);
+    }
 
     return result;
   }
@@ -136,35 +168,38 @@ async function runOneTaskWithTracking(
   task: SuiteTask,
   ctx: RunContext,
   runCostSoFar: number,
+  taskCount: number,
 ): Promise<TaskRunResult> {
   const calls: CallResult[] = [];
   let tokensIn = 0;
   let tokensOut = 0;
   let tokensCached: number | null = null;
   let costUsd = 0;
-  let httpErrors = 0;
+  let hadHttpError = false;
   let abortReason: AbortReason | undefined;
 
   const worstCasePerRun = calculateWorstCaseCost(
-    TASKS.length * ctx.maxSteps,
+    taskCount * ctx.maxSteps,
     ctx.iMax,
     MAX_COMPLETION_TOKENS,
     ctx.pricing,
   );
 
   if (ctx.fixture) {
+    const fixtureAnswer = task.fixtureAnswer ?? "";
+    const check = runCheck(fixtureAnswer, 0, task.check);
     return {
       taskId: task.id,
-      pass: true,
-      detail: "fixture",
-      finalAnswer: task.fixtureAnswer ?? "",
+      pass: check.pass,
+      detail: check.detail,
+      finalAnswer: fixtureAnswer,
       steps: 0,
       tokensIn: 0,
       tokensOut: 0,
       tokensCached: null,
       costUsd: 0,
-      empty: isEmptyAnswer(task.fixtureAnswer ?? ""),
-      httpErrors: 0,
+      empty: isEmptyAnswer(fixtureAnswer),
+      hadHttpError: false,
       calls: [],
     };
   }
@@ -174,43 +209,37 @@ async function runOneTaskWithTracking(
   const agentLog: unknown[] = [];
 
   let callStep = 0;
-  const wrappedLlm = new MatrixLlmClient(baseLlm, ctx.pricing, (usage) => {
-    callStep++;
-    tokensIn += usage.promptTokens;
-    tokensOut += usage.completionTokens;
-    if (usage.cachedTokens !== null) {
-      tokensCached = (tokensCached ?? 0) + usage.cachedTokens;
-    }
-    costUsd += usage.costUsd;
+  const wrappedLlm = new MatrixLlmClient(baseLlm, {
+    pricing: ctx.pricing,
+    maxInputTokens: ctx.maxInputTokens,
+    iMax: ctx.iMax,
+    globalCapUsd: ctx.globalCapUsd,
+    worstCasePerRun,
+    getCumulativeCost: () => ctx.cumulativeCost,
+    getRunCostSoFar: () => runCostSoFar,
+    getTaskCostSoFar: () => costUsd,
+    onCall: (usage) => {
+      callStep++;
+      tokensIn += usage.promptTokens;
+      tokensOut += usage.completionTokens;
+      if (usage.cachedTokens !== null) {
+        tokensCached = (tokensCached ?? 0) + usage.cachedTokens;
+      }
+      costUsd += usage.costUsd;
 
-    calls.push({
-      taskId: task.id,
-      step: callStep,
-      usage: {
-        promptTokens: usage.promptTokens,
-        completionTokens: usage.completionTokens,
-        cachedTokens: usage.cachedTokens,
-        costUsd: usage.costUsd,
-      },
-      empty: false,
-      httpError: false,
-    });
-
-    if (usage.completionTokens > MAX_COMPLETION_TOKENS) {
-      abortReason = "completion_tokens_exceeded";
-    }
-    if (usage.promptTokens > ctx.maxInputTokens) {
-      abortReason = "prompt_tokens_exceeded";
-    }
-    if (runCostSoFar + costUsd > worstCasePerRun) {
-      abortReason = "cost_exceeded";
-    }
-    if (
-      ctx.globalCapUsd !== undefined &&
-      ctx.cumulativeCost + runCostSoFar + costUsd > ctx.globalCapUsd
-    ) {
-      abortReason = "global_cap";
-    }
+      calls.push({
+        taskId: task.id,
+        step: callStep,
+        usage: {
+          promptTokens: usage.promptTokens,
+          completionTokens: usage.completionTokens,
+          cachedTokens: usage.cachedTokens,
+          costUsd: usage.costUsd,
+        },
+        empty: false,
+        httpError: false,
+      });
+    },
   });
 
   let finalAnswer = "";
@@ -231,14 +260,13 @@ async function runOneTaskWithTracking(
     finalAnswer = result.finalAnswer;
     steps = result.steps;
   } catch (err) {
-    httpErrors++;
-    if (calls.length > 0) {
-      calls[calls.length - 1].httpError = true;
-    }
-    const redacted = redactError(err);
-    const msg = redacted.message;
-    if (msg.includes("HTTP")) {
-      httpErrors++;
+    if (err instanceof MatrixAbort) {
+      abortReason = err.reason;
+    } else {
+      hadHttpError = true;
+      if (calls.length > 0) {
+        calls[calls.length - 1].httpError = true;
+      }
     }
   }
 
@@ -256,7 +284,7 @@ async function runOneTaskWithTracking(
     tokensCached,
     costUsd,
     empty,
-    httpErrors,
+    hadHttpError,
     calls,
     abortReason,
   };
@@ -277,9 +305,13 @@ export async function runMatrix(
 ): Promise<{ runs: RunResult[]; globalAbort: boolean }> {
   const sha = getGitSha();
   const sha7 = getGitSha7();
+
+  const tasks = getSuiteTasks(config.suite);
+  const taskCount = tasks.length;
+
   const suiteConfig = SUITE_CONFIGS[config.suite] ?? {
     version: config.suite,
-    taskCount: TASKS.length,
+    taskCount,
     maxSteps: 8,
     maxInputTokens: getDefaultMaxInputTokens(8),
   };
@@ -326,31 +358,14 @@ export async function runMatrix(
       let costUsd = 0;
       const emptyTasks: string[] = [];
       const allCalls: CallResult[] = [];
-      let runHttpErrors = 0;
+      let tasksWithHttpErrors = 0;
 
-      for (const task of TASKS) {
+      for (const task of tasks) {
         if (modelAbortReason || globalAbort) {
           break;
         }
 
-        if (
-          config.capUsd !== undefined &&
-          !config.fixture
-        ) {
-          const nextWorstCase = calculateWorstCaseCost(
-            1,
-            iMax,
-            MAX_COMPLETION_TOKENS,
-            pricing,
-          );
-          if (cumulativeCost + costUsd + nextWorstCase > config.capUsd) {
-            globalAbort = true;
-            callbacks?.onGlobalAbort?.();
-            break;
-          }
-        }
-
-        const taskResult = await runOneTaskWithTracking(task, ctx, costUsd);
+        const taskResult = await runOneTaskWithTracking(task, ctx, costUsd, taskCount);
 
         if (taskResult.pass) pass++;
         tokensIn += taskResult.tokensIn;
@@ -365,8 +380,10 @@ export async function runMatrix(
           emptyTasks.push(task.id);
         }
 
-        runHttpErrors += taskResult.httpErrors;
-        if (runHttpErrors >= 2) {
+        if (taskResult.hadHttpError) {
+          tasksWithHttpErrors++;
+        }
+        if (tasksWithHttpErrors >= 2) {
           modelAbortReason = "http_errors";
         }
 
@@ -388,7 +405,7 @@ export async function runMatrix(
         model: modelId,
         runN,
         pass,
-        total: TASKS.length,
+        total: taskCount,
         tokensIn,
         tokensOut,
         tokensCached,
@@ -407,7 +424,7 @@ export async function runMatrix(
         model: modelId,
         run_n: runN,
         pass,
-        total: TASKS.length,
+        total: taskCount,
         tokens_in: tokensIn,
         tokens_out: tokensOut,
         tokens_cached: tokensCached,
