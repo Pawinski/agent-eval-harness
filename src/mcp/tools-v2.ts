@@ -398,7 +398,7 @@ function validateSingleFunctionDeclaration(tsCode: string, expectedFuncName: str
  * 2. Function source: runs the patched function definition standalone
  * 3. Call script: invokes the function on each input and collects results
  */
-const WORKER_SCRIPT = `
+const WORKER_SCRIPT = `"use strict";
 const vm = require("node:vm");
 let input = "";
 process.stdin.setEncoding("utf8");
@@ -411,46 +411,58 @@ process.stdin.on("end", () => {
       microtaskMode: "afterEvaluate",
     });
     
-    // Capture safe references BEFORE any untrusted code runs
-    // These are kept on host side, not exposed to context
-    const safeStringify = JSON.stringify.bind(JSON);
-    const results = [];
-    const errors = [];
-    
     // Step 1: Run the patched function source standalone (no wrapper)
     const funcScript = new vm.Script(code);
     funcScript.runInContext(ctx, { timeout: 50 });
     
     // Step 2: Call script - invoke function on each input
-    // Results collected via return value, not context globals
-    const inputsJson = safeStringify(inputs);
+    // Results serialized IN-CONTEXT with captured JSON.stringify, returned as STRING
+    // Worker never spreads, reads properties of, or stringifies patch-created objects
+    const inputsJson = JSON.stringify(inputs);
     const callScript = new vm.Script(\`
       (function() {
+        "use strict";
+        const __S = JSON.stringify;
         const __inputs = JSON.parse('\${inputsJson.replace(/\\\\/g, "\\\\\\\\").replace(/'/g, "\\\\'")}');
         const __func = \${funcName};
         if (typeof __func !== "function") {
-          return { ok: false, error: "not a function" };
+          return __S({ ok: false, error: "not a function" });
         }
-        const __out = [];
+        const __out = new Array(__inputs.length);
         for (let __i = 0; __i < __inputs.length; __i++) {
           try {
-            __out.push(__func(__inputs[__i]));
+            __out[__i] = __func(__inputs[__i]);
           } catch (e) {
-            return { ok: false, error: "error:" + __i };
+            return __S({ ok: false, error: "error:" + __i });
           }
         }
-        return { ok: true, values: __out };
+        return __S({ ok: true, results: __out });
       })();
     \`);
-    const callResult = callScript.runInContext(ctx, { timeout: 100 });
+    const callResultStr = callScript.runInContext(ctx, { timeout: 100 });
     
-    if (!callResult || !callResult.ok) {
-      errors.push(callResult?.error || "unknown");
-    } else if (Array.isArray(callResult.values)) {
-      results.push(...callResult.values);
+    // callResultStr must be a string (serialized in-context)
+    // Parse it and re-serialize with worker's own JSON.stringify
+    if (typeof callResultStr !== "string") {
+      console.log("${RESULT_PREFIX}" + JSON.stringify({ results: [], errors: ["not a string"] }));
+      return;
     }
     
-    console.log("${RESULT_PREFIX}" + safeStringify({ results, errors }));
+    let parsed;
+    try {
+      parsed = JSON.parse(callResultStr);
+    } catch {
+      console.log("${RESULT_PREFIX}" + JSON.stringify({ results: [], errors: ["parse error"] }));
+      return;
+    }
+    
+    if (!parsed || !parsed.ok) {
+      console.log("${RESULT_PREFIX}" + JSON.stringify({ results: [], errors: [parsed?.error || "unknown"] }));
+      return;
+    }
+    
+    // Re-serialize with worker's JSON.stringify (safe from patch overrides)
+    console.log("${RESULT_PREFIX}" + JSON.stringify({ results: parsed.results, errors: [] }));
   } catch {}
 });
 `;

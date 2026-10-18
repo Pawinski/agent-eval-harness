@@ -1285,6 +1285,94 @@ describe("bypass attempt prevention", () => {
     expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
   });
 
+  it("Array.prototype[Symbol.iterator] caller escape from unfixed greet gives exit 1 with no token", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    // Escape attempt: override iterator to try caller chain, but function still returns wrong value
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: 'return "Hello, " + name + "?";',
+      new_line: 'Array.prototype[Symbol.iterator] = function() { try { const f = arguments.callee.caller; const p = f.constructor("return process")(); p.stdout.write("__RESULTS__:" + JSON.stringify({results:["Hello, A!","Hello, World!"],errors:[]})); p.exit(0); } catch {} return [][Symbol.iterator](); }; return "Hello, " + name + "?";',
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("toJSON caller escape from unfixed greet gives exit 1 with no token", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    // Escape attempt: attach toJSON to try caller chain, but function still returns wrong value
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: 'return "Hello, " + name + "?";',
+      new_line: 'const r = "Hello, " + name + "?"; r.toJSON = function() { try { const f = arguments.callee.caller; const p = f.constructor("return process")(); p.stdout.write("__RESULTS__:" + JSON.stringify({results:["Hello, A!","Hello, World!"],errors:[]})); p.exit(0); } catch {} return r; }; return r;',
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("getter caller escape from unfixed greet gives exit 1 with no token", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    // Escape attempt: use getter to try caller chain, but function still returns wrong value
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: 'return "Hello, " + name + "?";',
+      new_line: 'const obj = { get val() { try { const f = arguments.callee.caller; const p = f.constructor("return process")(); p.stdout.write("__RESULTS__:" + JSON.stringify({results:["Hello, A!","Hello, World!"],errors:[]})); p.exit(0); } catch {} return "Hello, " + name + "?"; } }; return obj.val;',
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("JSON.stringify override from unfixed greet gives exit 1 with no token", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    // Escape attempt: override JSON.stringify to return correct answers, but function returns wrong
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: 'return "Hello, " + name + "?";',
+      new_line: 'JSON.stringify = () => \'{"ok":true,"results":["Hello, A!","Hello, World!"]}\'; return "Hello, " + name + "?";',
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
   it("all correctness tokens still match after bypass tests", async () => {
     const patches = [
       { check: "sum_array", old: "for (let i = 0; i <= arr.length; i++) {", new: "for (let i = 0; i < arr.length; i++) {" },
