@@ -12,7 +12,7 @@
 | anthropic/claude-haiku-5.5 | 46/48 | 15.33 (16,16,14) | 2 | 90,077 | 10,429 | $0.014222 | 6d216f5 | scored (no temperature sent) |
 | openai/gpt-4o-mini | 46/48 | 15.33 (15,15,16) | 1 | 72,963 | 7,042 | $0.015170 | 6d216f5 | scored; 2 single empties (chain_word_count_multiply, runs 1 & 2) counted as fails |
 | openai/gpt-6.1-sol | 46/48 | 15.33 (15,16,15) | 1 | 70,243 | 13,422 | $0.274706 | 6d216f5 | scored (no temperature sent) |
-| mistralai/mistral-large-2512 | not scored (15/16 in run 1 only) | n/a | n/a | 27,067 | 4,731 | $0.020630 | 6d216f5 | **not scored (rate_limited)**: run 1 was 15/16 (1 empty); run 2 was rate-limited after 3 retries at 60/180/600 s and aborted; run 3 never ran |
+| mistralai/mistral-large-2512 | not scored (rate_limited) | n/a | n/a | 27,067 | 4,731 | $0.020630 | 6d216f5 | **not scored (rate_limited)**: run 1 was 15/16 (1 empty); run 2 was rate-limited after 3 retries at 60/180/600 s and aborted; run 3 never ran |
 | anthropic/claude-opus-5.5 | not scored | n/a | n/a | 0 | 0 | $0.000000 | 6d216f5 | **not scored: http_errors (provider content_filter refusal)**: missing_usage on the first 2 tasks, aborted (http_errors) at $0. The raw call got a 200 with finish_reason content_filter (provider refusal) |
 
 Total runner cost: $0.337329. Key-measured spend for this run: $0.328655 (usage $0.039101 → $0.367756).

@@ -256,8 +256,8 @@
       "passes": [
         15
       ],
-      "mean": 15,
-      "spread": 0,
+      "mean": null,
+      "spread": null,
       "abortedRuns": 1,
       "totalCost": 0.020629999999999996,
       "totalIn": 27067,
