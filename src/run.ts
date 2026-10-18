@@ -4,7 +4,7 @@
  * Usage:
  *   npm run eval                 # live LLM if OPENROUTER_API_KEY set, else dry-run stub
  *   npm run eval -- --fixture    # use fixture answers (no LLM) for offline smoke
- *   npm run eval -- --task echo_hello
+ *   npm run eval -- --task chain_json_regex_add
  */
 
 import { mkdir, writeFile } from "node:fs/promises";

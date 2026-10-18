@@ -237,7 +237,7 @@ function computeModelStats(runs: RunResult[]): Map<string, ModelStats> {
   return stats;
 }
 
-function printSummaryToConsole(runs: RunResult[], suite: string, capUsd: number, taskCount: number, skippedModels: SkippedModel[] = []): void {
+export function printSummaryToConsole(runs: RunResult[], suite: string, capUsd: number, taskCount: number, skippedModels: SkippedModel[] = []): void {
   console.log("\n=== Matrix Summary ===");
   console.log(`Suite: ${suite} | Cap: $${capUsd.toFixed(2)} | Tasks: ${taskCount}`);
   console.log("");
@@ -456,8 +456,14 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
   try {
     tasks = getSuiteTasks(args.suite);
   } catch {
-    console.error(`Error: Suite "${args.suite}" does not exist yet.`);
-    console.error(`Available suites: ${Object.keys(SUITE_CONFIGS).join(", ")}`);
+    const runnable = Object.keys(SUITE_CONFIGS).filter((s) => {
+      try { getSuiteTasks(s); return true; } catch { return false; }
+    });
+    console.error(`Error: Suite "${args.suite}" is not available on this commit.`);
+    console.error(`Available suites: ${runnable.join(", ")}`);
+    if (args.suite === "0.1.0") {
+      console.error("Suite 0.1.0 was retired from main; reproduce it at commit e61f639 (see README).");
+    }
     return 1;
   }
 

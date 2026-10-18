@@ -4,7 +4,10 @@ Public eval harness (ReAct + MCP + multi-model LLM).
 
 Frozen task suite + deterministic checkers. Publish score as **pass/N on suite version**. Re-score after every change. No human grader. No LLM-as-judge for MVP.
 
-> **Suite 0.2.0** is now the default. Suite 0.1.0 source was retired; reproduce 0.1.0 at commit e61f639.
+> **Published score:** 7/7 on suite 0.1.0 at `4100fbb`, model `nex-agi/nex-n2.5-pro` (paid), one live run, 4,721 prompt / 1,102 completion tokens.
+> Note: `nex-agi/nex-n2.5-pro:free` is no longer listed on OpenRouter (checked 2026-10-17).
+
+**Suite 0.2.0** is now the default. Suite 0.1.0 source was retired from main; reproduce 0.1.0 at commit e61f639 (see below).
 
 ## Suite version (single source of truth)
 
@@ -126,11 +129,13 @@ Results are written to `results/<suite>/` with per-run JSON files and a summary.
 
 ## Suite 0.1.0 (archived)
 
-Suite 0.1.0 source is retired from main. To reproduce 0.1.0 results:
+Suite 0.1.0 source is retired from main. The `results/0.1.0/e61f639-*` rows came from the live matrix at commit e61f639. To reproduce them:
 
 ```bash
-git checkout e61f639 && npm ci && npm run matrix -- --fixture
+git checkout e61f639 && npm ci && OPENROUTER_API_KEY=... npm run matrix -- --suite 0.1.0
 ```
+
+Offline check at the same commit (no key, $0): `npm run matrix -- --suite 0.1.0 --fixture` (7/7 per run).
 
 ## Suite 0.2.0
 

@@ -132,6 +132,10 @@ describe("suite 0.1.0 config preserved", () => {
     expect(config.maxInputTokens).toBe(3000);
     expect(config.defaultCapUsd).toBe(10.0);
   });
+
+  it("getDefaultIMax returns 3000 for 0.1.0 with maxSteps 8", () => {
+    expect(getDefaultIMax("0.1.0", 8)).toBe(3000);
+  });
 });
 
 describe("task fixture tool call counts", () => {
