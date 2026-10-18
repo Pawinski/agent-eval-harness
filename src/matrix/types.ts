@@ -2,7 +2,7 @@
  * Types for the multi-model matrix runner.
  */
 
-import { TASKS, type SuiteTask } from "../suite/index.js";
+import { TASKS, TASKS_V2, type SuiteTask, type SuiteTaskV2 } from "../suite/index.js";
 
 export interface ModelPricing {
   modelId: string;
@@ -42,7 +42,24 @@ export function getSuiteTasks(version: string): SuiteTask[] {
   if (version === "0.1.0") {
     return TASKS;
   }
+  if (version === "0.2.0") {
+    return TASKS_V2.map((t) => ({
+      id: t.id,
+      description: t.description,
+      prompt: t.prompt,
+      expectedTools: t.expectedTools,
+      check: t.check,
+      fixtureAnswer: t.fixtureAnswer,
+    }));
+  }
   throw new Error(`Unknown suite version: ${version}`);
+}
+
+export function getSuiteTasksV2(version: string): SuiteTaskV2[] {
+  if (version === "0.2.0") {
+    return TASKS_V2;
+  }
+  throw new Error(`Suite ${version} does not have v2 task metadata`);
 }
 
 export interface PriceData {
@@ -65,6 +82,13 @@ export const SUITE_CONFIGS: Record<string, SuiteConfig> = {
     maxSteps: 8,
     maxInputTokens: 3000,
     defaultCapUsd: 10.0,
+  },
+  "0.2.0": {
+    version: "0.2.0",
+    taskCount: 16,
+    maxSteps: 12,
+    maxInputTokens: 4700,
+    defaultCapUsd: 35.0,
   },
 };
 

@@ -11,6 +11,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { runPreflight } from "./mcp/index.js";
 import {
   fetchModelPrices,
   validatePricesForModels,
@@ -404,6 +405,10 @@ export async function runMain(deps: RunMainDeps = {}): Promise<number> {
     console.error(`Error: Suite "${args.suite}" does not exist yet.`);
     console.error(`Available suites: ${Object.keys(SUITE_CONFIGS).join(", ")}`);
     return 1;
+  }
+
+  if (args.suite === "0.2.0") {
+    runPreflight();
   }
 
   const apiKey = env.OPENROUTER_API_KEY;

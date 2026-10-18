@@ -85,7 +85,7 @@ The matrix runner evaluates multiple models across multiple runs with cost caps.
 OPENROUTER_API_KEY=... npm run matrix
 ```
 
-**Suite 0.2.0** (when available):
+**Suite 0.2.0:**
 
 ```bash
 OPENROUTER_API_KEY=... npm run matrix -- --suite 0.2.0
@@ -144,6 +144,43 @@ Results are written to `results/<suite>/` with per-run JSON files and a summary.
 | `word_count_phrase` | exact |
 | `json_equal_payload` | json_equal |
 | `contains_basilisk` | contains |
+
+## Suite 0.2.0
+
+Suite 0.2.0 expands coverage to 16 tasks across 6 categories:
+
+| Category | Tasks | Description |
+|----------|-------|-------------|
+| `chain` | 3 | Multi-step tool chaining (JSON → regex → arithmetic) |
+| `selection` | 3 | Select the right tool from the full catalog |
+| `code_read` | 3 | Read and analyze code fixtures |
+| `patch` | 3 | Fix bugs via patch then verify |
+| `data` | 2 | CSV filtering and aggregation |
+| `error_recovery` | 2 | Retry after transient errors |
+
+### Using the `--suite` flag
+
+Run eval or matrix against a specific suite version:
+
+```bash
+npm run eval -- --suite 0.2.0 --fixture
+npm run matrix -- --suite 0.2.0 --fixture
+```
+
+Suite 0.2.0 introduces 6 new tools (11 total): `read_file`, `apply_patch`, `run_check`, `csv_query`, `flaky_sum`, `flaky_lookup`. Chain and selection tasks see the full 11-tool catalog; other tasks see only their listed subset (via `expectedTools`).
+
+**Scoring**: Every task, including selection tasks, is scored on the final answer only. The `expectedTools` field limits the visible tool catalog but does not affect scoring.
+
+### Suite 0.2.0 defaults
+
+- **Tasks**: 16
+- **Max steps per task**: 6–12 (task-dependent, default 8)
+- **Cost cap**: $35.00
+- **Prompt threshold**: 4,700 tokens
+
+### Node version requirement
+
+Suite 0.2.0 requires **Node >= 22** with permission model support. Patch verification executes model-generated code in a separate permission-restricted Node process with a hard timeout. A preflight check runs at startup and exits with an error if the permission model is unavailable.
 
 ## Env
 

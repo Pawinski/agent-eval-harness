@@ -14,7 +14,7 @@
     "ban-scan": "node --import tsx src/tests/ban-scan.ts"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "keywords": [
     "eval",
@@ -23,10 +23,12 @@
     "openrouter"
   ],
   "license": "MIT",
+  "dependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
   "devDependencies": {
     "@types/node": "^22.10.0",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
     "vitest": "^5.0.3"
   }
 }

@@ -1,5 +1,6 @@
 export {
   createDefaultMcpClient,
+  getDefaultToolDefinitions,
   InProcessMcpClient,
   type InProcessMcpOptions,
   type McpToolCall,
@@ -7,3 +8,20 @@ export {
   type McpToolResult,
   type McpToolSchema,
 } from "./client.js";
+
+export {
+  createToolsV2Context,
+  createToolsV2Options,
+  createReadFileTool,
+  createApplyPatchTool,
+  createRunCheckTool,
+  createCsvQueryTool,
+  createFlakySumTool,
+  createFlakyLookupTool,
+  runPreflight,
+  checkPermissionModelSupport,
+  type ToolsV2Context,
+  type PatchState,
+  type ErrorRecoveryState,
+  type PermissionCheckDeps,
+} from "./tools-v2.js";

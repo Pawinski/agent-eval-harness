@@ -1,0 +1,10 @@
+date,city,temp_c,humidity,condition
+2026-01-01,Warsaw,2,80,cloudy
+2026-01-01,Berlin,0,75,snow
+2026-01-01,Paris,5,65,clear
+2026-01-02,Warsaw,-1,85,snow
+2026-01-02,Berlin,-3,90,snow
+2026-01-02,Paris,4,70,rain
+2026-01-03,Warsaw,3,60,clear
+2026-01-03,Berlin,1,55,clear
+2026-01-03,Paris,7,50,clear
