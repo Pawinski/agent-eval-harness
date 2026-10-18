@@ -23,4 +23,5 @@ export {
   type ToolsV2Context,
   type PatchState,
   type ErrorRecoveryState,
+  type PermissionCheckDeps,
 } from "./tools-v2.js";

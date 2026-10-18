@@ -8,12 +8,21 @@ import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { transpileModule, ModuleKind, ScriptTarget } from "typescript";
+import {
+  transpileModule,
+  ModuleKind,
+  ScriptTarget,
+  createSourceFile,
+  ScriptKind,
+  SyntaxKind,
+  type SourceFile,
+  type Node as TSNode,
+} from "typescript";
 import type { McpToolResult, McpToolSchema, InProcessMcpOptions } from "./client.js";
 import { getDefaultToolDefinitions } from "./client.js";
 
 const VERIFICATION_SALT = "v020-check-7f3a9c";
-const PASS_MARKER = "__CHECK_PASS__";
+const RESULT_PREFIX = "__RESULTS__:";
 const MAX_STDOUT_BYTES = 1024;
 const CHILD_TIMEOUT_MS = 2000;
 
@@ -279,25 +288,37 @@ interface TestCase<T, R> {
   expected: R;
 }
 
+export interface PermissionCheckDeps {
+  nodeVersion?: string;
+  spawnProbe?: () => { status: number | null; stdout: string };
+}
+
 /**
  * Check if Node's permission model is available.
  * Returns { ok: true } if --permission works, { ok: false, message } otherwise.
+ * Accepts optional deps for testing.
  */
-export function checkPermissionModelSupport(): { ok: boolean; message?: string } {
-  const nodeVersion = process.versions.node;
+export function checkPermissionModelSupport(deps: PermissionCheckDeps = {}): { ok: boolean; message?: string } {
+  const nodeVersion = deps.nodeVersion ?? process.versions.node;
   const [major] = nodeVersion.split(".").map(Number);
   
   if (major < 22) {
     return { ok: false, message: `Node ${nodeVersion} is too old; permission model requires Node >= 22` };
   }
 
-  const result = spawnSync(process.execPath, ["--permission", "-e", "console.log('ok')"], {
-    env: {},
-    timeout: 5000,
-    encoding: "utf8",
-  });
+  let probeResult: { status: number | null; stdout: string };
+  if (deps.spawnProbe) {
+    probeResult = deps.spawnProbe();
+  } else {
+    const result = spawnSync(process.execPath, ["--permission", "-e", "console.log('ok')"], {
+      env: {},
+      timeout: 5000,
+      encoding: "utf8",
+    });
+    probeResult = { status: result.status, stdout: result.stdout ?? "" };
+  }
 
-  if (result.status !== 0 || !result.stdout?.includes("ok")) {
+  if (probeResult.status !== 0 || !probeResult.stdout.includes("ok")) {
     return { ok: false, message: `Node ${nodeVersion} does not support --permission flag` };
   }
 
@@ -319,8 +340,63 @@ export function runPreflight(): void {
 }
 
 /**
+ * Validate that extracted code is exactly one function declaration with the expected name.
+ * Uses TypeScript parser to ensure no other top-level statements.
+ */
+function validateSingleFunctionDeclaration(tsCode: string, expectedFuncName: string): boolean {
+  try {
+    const sourceFile: SourceFile = createSourceFile(
+      "check.ts",
+      tsCode,
+      ScriptTarget.ES2020,
+      true,
+      ScriptKind.TS
+    );
+
+    const topLevelStatements: TSNode[] = [];
+    sourceFile.forEachChild((node) => {
+      if (node.kind !== SyntaxKind.EndOfFileToken) {
+        topLevelStatements.push(node);
+      }
+    });
+
+    if (topLevelStatements.length !== 1) {
+      return false;
+    }
+
+    const stmt = topLevelStatements[0];
+    if (stmt.kind !== SyntaxKind.FunctionDeclaration) {
+      return false;
+    }
+
+    const funcDecl = stmt as { name?: { text: string } };
+    if (!funcDecl.name || funcDecl.name.text !== expectedFuncName) {
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Inline worker script for permission-restricted child process.
- * Reads JSON from stdin, runs function in sandboxed vm, outputs PASS_MARKER or nothing.
+ * 
+ * Protocol:
+ * - Input (stdin): JSON { code, funcName, inputs }
+ *   - code: the transpiled function source (standalone, no wrapper)
+ *   - funcName: name of the function to call
+ *   - inputs: array of input values to test
+ * - Output (stdout): "__RESULTS__:" + JSON array of results
+ * 
+ * The child NEVER sees expected values. It only runs the function and returns results.
+ * The host compares results against expected values and mints the token.
+ * 
+ * Uses three separate vm.Script runs:
+ * 1. Harness prelude: captures/freezes JSON.stringify before any patch code
+ * 2. Function source: runs the patched function definition standalone
+ * 3. Call script: invokes the function on each input and collects results
  */
 const WORKER_SCRIPT = `
 const vm = require("node:vm");
@@ -329,43 +405,65 @@ process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => { input += chunk; });
 process.stdin.on("end", () => {
   try {
-    const { code, funcName, tests } = JSON.parse(input);
+    const { code, funcName, inputs } = JSON.parse(input);
     const ctx = vm.createContext(Object.create(null), {
       codeGeneration: { strings: false, wasm: false },
     });
-    const inputsJson = JSON.stringify(tests.map(t => t.input));
-    const expectedJson = JSON.stringify(tests.map(t => t.expected));
-    const script = new vm.Script(\`
+    
+    // Step 1: Harness prelude - capture JSON.stringify before any patch code runs
+    const prelude = new vm.Script(\`
+      const __safeStringify = JSON.stringify.bind(JSON);
+      const __results = [];
+      const __errors = [];
+    \`);
+    prelude.runInContext(ctx, { timeout: 50 });
+    
+    // Step 2: Run the patched function source standalone (no wrapper)
+    const funcScript = new vm.Script(code);
+    funcScript.runInContext(ctx, { timeout: 50 });
+    
+    // Step 3: Call script - invoke function on each input
+    const inputsJson = JSON.stringify(inputs);
+    const callScript = new vm.Script(\`
       (function() {
         const __inputs = JSON.parse('\${inputsJson.replace(/\\\\/g, "\\\\\\\\").replace(/'/g, "\\\\'")}');
-        const __expected = JSON.parse('\${expectedJson.replace(/\\\\/g, "\\\\\\\\").replace(/'/g, "\\\\'")}');
-        \${code}
         const __func = \${funcName};
-        if (typeof __func !== "function") return false;
+        if (typeof __func !== "function") {
+          __errors.push("not a function");
+          return;
+        }
         for (let __i = 0; __i < __inputs.length; __i++) {
           try {
-            if (__func(__inputs[__i]) !== __expected[__i]) return false;
-          } catch { return false; }
+            __results.push(__func(__inputs[__i]));
+          } catch (e) {
+            __errors.push("error:" + __i);
+            return;
+          }
         }
-        return true;
       })();
     \`);
-    const passed = script.runInContext(ctx, { timeout: 100 });
-    if (passed === true) console.log("${PASS_MARKER}");
+    callScript.runInContext(ctx, { timeout: 100 });
+    
+    // Step 4: Serialize results using the safe stringify captured in prelude
+    const outputScript = new vm.Script(\`__safeStringify({ results: __results, errors: __errors })\`);
+    const output = outputScript.runInContext(ctx, { timeout: 50 });
+    
+    console.log("${RESULT_PREFIX}" + output);
   } catch {}
 });
 `;
 
 /**
  * Run behavior check in a separate permission-restricted Node process.
- * Returns true only if the child outputs exactly the PASS_MARKER.
+ * Child returns results; host compares against expected values.
  */
 function runBehaviorCheckSync(
   jsCode: string,
   funcName: string,
-  testCases: TestCase<unknown, unknown>[]
+  inputs: unknown[],
+  expectedOutputs: unknown[]
 ): boolean {
-  const stdinData = JSON.stringify({ code: jsCode, funcName, tests: testCases });
+  const stdinData = JSON.stringify({ code: jsCode, funcName, inputs });
   
   try {
     const result = spawnSync(
@@ -381,11 +479,81 @@ function runBehaviorCheckSync(
       }
     );
 
+    if (result.status !== 0) {
+      return false;
+    }
+
     const stdout = result.stdout?.toString("utf8") ?? "";
-    return result.status === 0 && stdout.trim() === PASS_MARKER;
+    const trimmed = stdout.trim();
+    
+    if (!trimmed.startsWith(RESULT_PREFIX)) {
+      return false;
+    }
+    
+    const jsonPart = trimmed.slice(RESULT_PREFIX.length);
+    let parsed: { results?: unknown[]; errors?: string[] };
+    try {
+      parsed = JSON.parse(jsonPart);
+    } catch {
+      return false;
+    }
+    
+    if (!parsed || !Array.isArray(parsed.results)) {
+      return false;
+    }
+    
+    if (parsed.errors && parsed.errors.length > 0) {
+      return false;
+    }
+    
+    if (parsed.results.length !== expectedOutputs.length) {
+      return false;
+    }
+    
+    for (let i = 0; i < expectedOutputs.length; i++) {
+      if (!deepEqual(parsed.results[i], expectedOutputs[i])) {
+        return false;
+      }
+    }
+    
+    return true;
   } catch {
     return false;
   }
+}
+
+/**
+ * Deep equality comparison for comparing child results to expected values.
+ */
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (a === null || b === null) return a === b;
+  if (typeof a !== "object") return false;
+  
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!deepEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  
+  if (Array.isArray(a) || Array.isArray(b)) return false;
+  
+  const aObj = a as Record<string, unknown>;
+  const bObj = b as Record<string, unknown>;
+  const aKeys = Object.keys(aObj);
+  const bKeys = Object.keys(bObj);
+  
+  if (aKeys.length !== bKeys.length) return false;
+  
+  for (const key of aKeys) {
+    if (!Object.prototype.hasOwnProperty.call(bObj, key)) return false;
+    if (!deepEqual(aObj[key], bObj[key])) return false;
+  }
+  
+  return true;
 }
 
 const CHECK_TEST_CASES: Record<string, { funcName: string; tests: TestCase<unknown, unknown>[] }> = {
@@ -431,6 +599,10 @@ function runFixtureCheck(content: string, checkName: string, wasPatched: boolean
     return { exitCode: 1, passed: false, message: "check failed" };
   }
   
+  if (!validateSingleFunctionDeclaration(funcSource, checkConfig.funcName)) {
+    return { exitCode: 1, passed: false, message: "check failed" };
+  }
+  
   let jsCode: string;
   try {
     jsCode = transpileToJs(funcSource);
@@ -438,7 +610,10 @@ function runFixtureCheck(content: string, checkName: string, wasPatched: boolean
     return { exitCode: 1, passed: false, message: "check failed" };
   }
   
-  const passed = runBehaviorCheckSync(jsCode, checkConfig.funcName, checkConfig.tests);
+  const inputs = checkConfig.tests.map((t) => t.input);
+  const expectedOutputs = checkConfig.tests.map((t) => t.expected);
+  
+  const passed = runBehaviorCheckSync(jsCode, checkConfig.funcName, inputs, expectedOutputs);
   if (!passed) {
     return { exitCode: 1, passed: false, message: "check failed" };
   }

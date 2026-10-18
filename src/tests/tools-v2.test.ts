@@ -12,6 +12,7 @@ import {
   createFlakyLookupTool,
   checkPermissionModelSupport,
   type ToolsV2Context,
+  type PermissionCheckDeps,
 } from "../mcp/tools-v2.js";
 import { InProcessMcpClient, type McpToolSchema } from "../mcp/client.js";
 import { TASKS_V2 } from "../suite/tasks-v2.js";
@@ -1100,6 +1101,102 @@ describe("child process security isolation", () => {
   });
 });
 
+describe("bypass attempt prevention", () => {
+  const EXPECTED_TOKENS = {
+    sum_array: "86d9c6a6",
+    find_max: "fee3b425",
+    greet: "186712ae",
+  };
+
+  function countChildProcesses(): number {
+    const result = spawnSync("pgrep", ["-c", "-P", String(process.pid)], { encoding: "utf8" });
+    return parseInt(result.stdout.trim() || "0", 10);
+  }
+
+  it("counter trick on greet gives exit 1 with no token", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: 'return "Hello, " + name + "?";',
+      new_line: "return __expected[(globalThis.__k=(globalThis.__k||0)+1)-1];",
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("counter trick on sumArray gives exit 1 with no token", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: "for (let i = 0; i <= arr.length; i++) {",
+      new_line: "return __expected[(globalThis.__k=(globalThis.__k||0)+1)-1]; for (let i = 0; i < arr.length; i++) {",
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("early-return/close-function trick gives exit 1 with no token", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: 'return "Hello, " + name + "?";',
+      new_line: "return 0; } return true; function __z(name) { return name;",
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("all correctness tokens still match after bypass tests", async () => {
+    const patches = [
+      { check: "sum_array", old: "for (let i = 0; i <= arr.length; i++) {", new: "for (let i = 0; i < arr.length; i++) {" },
+      { check: "find_max", old: "if (arr[i] < max) {", new: "if (arr[i] > max) {" },
+      { check: "greet", old: 'return "Hello, " + name + "?";', new: 'return "Hello, " + name + "!";' },
+    ];
+    
+    for (const p of patches) {
+      const ctx = createToolsV2Context();
+      const patchTool = createApplyPatchTool(ctx);
+      const checkTool = createRunCheckTool(ctx);
+      
+      await patchTool.handler({ path: "code/buggy.ts", old_line: p.old, new_line: p.new });
+      const result = await checkTool.handler({ path: "code/buggy.ts", check: p.check });
+      
+      expect(result.content).toContain("exit 0");
+      expect(result.content).toContain(`verification: ${EXPECTED_TOKENS[p.check as keyof typeof EXPECTED_TOKENS]}`);
+    }
+  });
+});
+
 describe("preflight check", () => {
   it("checkPermissionModelSupport returns ok on supported Node", () => {
     const result = checkPermissionModelSupport();
@@ -1118,5 +1215,34 @@ describe("preflight check", () => {
       const result = checkPermissionModelSupport();
       expect(result.ok).toBe(true);
     }
+  });
+
+  it("preflight failure with injected old Node version", () => {
+    const deps: PermissionCheckDeps = {
+      nodeVersion: "18.0.0",
+    };
+    const result = checkPermissionModelSupport(deps);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("too old");
+    expect(result.message).toContain("18.0.0");
+  });
+
+  it("preflight failure with injected failing spawn probe", () => {
+    const deps: PermissionCheckDeps = {
+      nodeVersion: "22.0.0",
+      spawnProbe: () => ({ status: 1, stdout: "" }),
+    };
+    const result = checkPermissionModelSupport(deps);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("does not support");
+  });
+
+  it("preflight success with injected passing spawn probe", () => {
+    const deps: PermissionCheckDeps = {
+      nodeVersion: "22.0.0",
+      spawnProbe: () => ({ status: 0, stdout: "ok\n" }),
+    };
+    const result = checkPermissionModelSupport(deps);
+    expect(result.ok).toBe(true);
   });
 });
