@@ -24,6 +24,13 @@ describe("read_file tool", () => {
     expect(result.content).toContain("export function compute");
   });
 
+  it("outputs line numbers", async () => {
+    const result = await tool.handler({ path: "code/calculator.ts" });
+    expect(result.ok).toBe(true);
+    expect(result.content).toMatch(/^\s*1\|/);
+    expect(result.content).toContain(" 25| ");
+  });
+
   it("rejects path traversal with ..", async () => {
     const result = await tool.handler({ path: "../package.json" });
     expect(result.ok).toBe(false);
@@ -269,17 +276,47 @@ describe("csv_query tool", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toBe("path traversal rejected");
   });
+
+  it("filters with quoted value (trims quotes)", async () => {
+    const result = await tool.handler({
+      path: "data/inventory.csv",
+      filter: 'category="electronics"',
+    });
+    expect(result.ok).toBe(true);
+    const data = result.data as Array<Record<string, string>>;
+    expect(data.length).toBe(4);
+    expect(data.every((r) => r.category === "electronics")).toBe(true);
+  });
+
+  it("filters case-insensitively", async () => {
+    const result = await tool.handler({
+      path: "data/inventory.csv",
+      filter: "category=ELECTRONICS",
+    });
+    expect(result.ok).toBe(true);
+    const data = result.data as Array<Record<string, string>>;
+    expect(data.length).toBe(4);
+  });
+
+  it("returns error when no rows match filter", async () => {
+    const result = await tool.handler({
+      path: "data/inventory.csv",
+      filter: "category=nonexistent",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("no rows match filter");
+  });
 });
 
 describe("error recovery tools", () => {
   describe("flaky_sum tool", () => {
-    it("fails on first call with ERROR", async () => {
+    it("fails on first call with error", async () => {
       const ctx = createToolsV2Context();
       const tool = createFlakySumTool(ctx);
 
       const result1 = await tool.handler({ a: 10, b: 20 });
       expect(result1.ok).toBe(false);
-      expect(result1.error).toContain("ERROR");
+      expect(result1.error).toContain("temporarily unavailable");
     });
 
     it("succeeds on second call (same args)", async () => {
@@ -325,13 +362,13 @@ describe("error recovery tools", () => {
   });
 
   describe("flaky_lookup tool", () => {
-    it("fails on first call with ERROR", async () => {
+    it("fails on first call with error", async () => {
       const ctx = createToolsV2Context();
       const tool = createFlakyLookupTool(ctx);
 
       const result1 = await tool.handler({ sku: "SKU-100" });
       expect(result1.ok).toBe(false);
-      expect(result1.error).toContain("ERROR");
+      expect(result1.error).toContain("timeout");
     });
 
     it("succeeds on second call (same args)", async () => {

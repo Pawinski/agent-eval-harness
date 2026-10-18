@@ -24,13 +24,13 @@ export const TASKS_V2: SuiteTaskV2[] = [
   {
     id: "chain_json_regex_add",
     category: "chain",
-    description: "Extract a value from JSON, apply regex, then add numbers.",
+    description: "Extract a value from JSON, apply regex, then sum numbers.",
     prompt: `You have access to tools for parsing JSON, extracting patterns, and arithmetic.
 Given the JSON string: {"order":"INV-2024-0042","amount":150}
 1. Extract the "order" field value
 2. Extract just the numeric ID from that order string (the digits after the last hyphen)
-3. Add that number to the amount field value
-Report only the final sum as a plain integer.`,
+3. Compute the sum of that number and the amount field value
+Report only the final result as a plain integer.`,
     check: { kind: "exact", expected: "192" },
     fixtureAnswer: "192",
     maxSteps: 8,
@@ -56,8 +56,8 @@ Report only the final product as a plain integer.`,
 Given the text: "Order total: $45.00, Shipping: $12.00"
 1. Extract the first dollar amount (just digits, no decimal)
 2. Extract the second dollar amount (just digits, no decimal)
-3. Add them together
-Report only the final sum as a plain integer.`,
+3. Compute their sum
+Report only the final result as a plain integer.`,
     check: { kind: "exact", expected: "57" },
     fixtureAnswer: "57",
     maxSteps: 8,
@@ -69,9 +69,9 @@ Report only the final sum as a plain integer.`,
   {
     id: "select_echo_tool",
     category: "selection",
-    description: "Select the right tool from the full catalog to echo text.",
+    description: "Select the right tool from the full catalog to repeat text.",
     prompt: `You have access to many tools. Pick the appropriate one.
-Echo back the exact text "hello-world" and report that text as your final answer.`,
+Return the exact text "hello-world" without modification and report that text as your final answer.`,
     expectedTools: undefined,
     check: { kind: "exact", expected: "hello-world" },
     fixtureAnswer: "hello-world",
@@ -123,8 +123,8 @@ Report only the numeric result.`,
     prompt: `Read the file code/calculator.ts and find the line number where the factorial function throws an error for negative input.
 Report only the line number as an integer.`,
     expectedTools: ["read_file"],
-    check: { kind: "exact", expected: "24" },
-    fixtureAnswer: "24",
+    check: { kind: "exact", expected: "25" },
+    fixtureAnswer: "25",
     maxSteps: 6,
   },
   {
@@ -149,10 +149,10 @@ Report only the exact error string.`,
     description: "Fix an off-by-one bug in sumArray function.",
     prompt: `The file code/buggy.ts contains a sumArray function with a bug.
 The loop condition causes an array index out-of-bounds error.
-Fix the bug by patching the file, then run the sum_array check.
-Report "fixed" if the check passes (exit 0), otherwise report "failed".`,
+Fix the bug by patching the file, then verify the array summation logic passes.
+Report "fixed" if the verification succeeds (exit 0), otherwise report "failed".`,
     expectedTools: ["read_file", "apply_patch", "run_check"],
-    check: { kind: "exact", expected: "fixed" },
+    check: { kind: "regex", pattern: "^[Ff]ixed\\.?$" },
     fixtureAnswer: "fixed",
     maxSteps: 10,
   },
@@ -162,10 +162,10 @@ Report "fixed" if the check passes (exit 0), otherwise report "failed".`,
     description: "Fix an inverted comparison in findMax function.",
     prompt: `The file code/buggy.ts contains a findMax function that returns the minimum instead of maximum.
 The comparison operator is wrong.
-Fix the bug by patching the file, then run the find_max check.
-Report "fixed" if the check passes (exit 0), otherwise report "failed".`,
+Fix the bug by patching the file, then verify the maximum-finding logic passes.
+Report "fixed" if the verification succeeds (exit 0), otherwise report "failed".`,
     expectedTools: ["read_file", "apply_patch", "run_check"],
-    check: { kind: "exact", expected: "fixed" },
+    check: { kind: "regex", pattern: "^[Ff]ixed\\.?$" },
     fixtureAnswer: "fixed",
     maxSteps: 10,
   },
@@ -173,11 +173,11 @@ Report "fixed" if the check passes (exit 0), otherwise report "failed".`,
     id: "patch_greet",
     category: "patch",
     description: "Fix wrong punctuation in greet function.",
-    prompt: `The file code/buggy.ts contains a greet function that uses a question mark instead of an exclamation mark.
-Fix the punctuation by patching the file, then run the greet check.
-Report "fixed" if the check passes (exit 0), otherwise report "failed".`,
+    prompt: `The file code/buggy.ts contains a greeting function that uses a question mark instead of an exclamation mark.
+Fix the punctuation by patching the file, then verify the greeting logic passes.
+Report "fixed" if the verification succeeds (exit 0), otherwise report "failed".`,
     expectedTools: ["read_file", "apply_patch", "run_check"],
-    check: { kind: "exact", expected: "fixed" },
+    check: { kind: "regex", pattern: "^[Ff]ixed\\.?$" },
     fixtureAnswer: "fixed",
     maxSteps: 10,
   },
@@ -219,8 +219,8 @@ Report only the JSON object with the average rounded to 2 decimal places, like {
     id: "error_recovery_sum",
     category: "error_recovery",
     description: "Retry after transient error on sum operation.",
-    prompt: `Use the flaky_sum tool to compute 25 + 17.
-The tool may return an error on the first attempt. If it does, retry with the same arguments.
+    prompt: `Compute the sum of 25 and 17 using the service that performs addition.
+The service may fail transiently on the first attempt. If it does, retry with the same input.
 Report only the final numeric result.`,
     expectedTools: ["flaky_sum"],
     check: { kind: "exact", expected: "42" },
@@ -231,8 +231,8 @@ Report only the final numeric result.`,
     id: "error_recovery_lookup",
     category: "error_recovery",
     description: "Retry after transient error on lookup operation.",
-    prompt: `Use the flaky_lookup tool to look up the product name for SKU "SKU-200".
-The tool may return an error on the first attempt. If it does, retry with the same arguments.
+    prompt: `Look up the product name for SKU "SKU-200" using the product catalog service.
+The service may fail transiently on the first attempt. If it does, retry with the same input.
 Report only the product name.`,
     expectedTools: ["flaky_lookup"],
     check: { kind: "exact", expected: "Widget Premium" },

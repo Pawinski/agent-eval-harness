@@ -145,6 +145,37 @@ Results are written to `results/<suite>/` with per-run JSON files and a summary.
 | `json_equal_payload` | json_equal |
 | `contains_basilisk` | contains |
 
+## Suite 0.2.0
+
+Suite 0.2.0 expands coverage to 16 tasks across 6 categories:
+
+| Category | Tasks | Description |
+|----------|-------|-------------|
+| `chain` | 3 | Multi-step tool chaining (JSON → regex → arithmetic) |
+| `selection` | 3 | Select the right tool from the full catalog |
+| `code_read` | 3 | Read and analyze code fixtures |
+| `patch` | 3 | Fix bugs via patch then verify |
+| `data` | 2 | CSV filtering and aggregation |
+| `error_recovery` | 2 | Retry after transient errors |
+
+### Using the `--suite` flag
+
+Run eval or matrix against a specific suite version:
+
+```bash
+npm run eval -- --suite 0.2.0 --fixture
+npm run matrix -- --suite 0.2.0 --fixture
+```
+
+Suite 0.2.0 introduces 6 new tools (11 total): `read_file`, `apply_patch`, `run_check`, `csv_query`, `flaky_sum`, `flaky_lookup`. Tasks see either a subset (via `expectedTools`) or the full catalog (selection tasks).
+
+### Suite 0.2.0 defaults
+
+- **Tasks**: 16
+- **Max steps per task**: 6–12 (task-dependent, default 8)
+- **Cost cap**: $35.00
+- **Prompt threshold**: 4,700 tokens
+
 ## Env
 
 See `.env.example`:

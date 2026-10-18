@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { TASKS_V2 } from "../suite/tasks-v2.js";
-import { getToolsV2Schemas } from "../mcp/tools-v2.js";
+import { getToolsV2Schemas, createToolsV2Options, createToolsV2Context } from "../mcp/tools-v2.js";
+import { InProcessMcpClient } from "../mcp/client.js";
 
 const DEFAULT_SYSTEM_PROMPT = `You are a ReAct agent. Use this format strictly:
 
@@ -21,6 +22,14 @@ function estimateTokens(text: string, charsPerToken = 4): number {
 }
 
 describe("prompt size constraints for 0.2.0", () => {
+  const ctx = createToolsV2Context();
+  const client = new InProcessMcpClient(createToolsV2Options(ctx));
+  
+  it("uses live tool catalog from actual client", async () => {
+    const liveTools = await client.listTools();
+    expect(liveTools.length).toBe(11);
+  });
+  
   const toolSchemas = getToolsV2Schemas();
   const toolCatalog = toolSchemas.map((t) => `- ${t.name}: ${t.description}`).join("\n");
   const systemContent = `${DEFAULT_SYSTEM_PROMPT}\n\nAvailable tools:\n${toolCatalog}`;
@@ -55,23 +64,23 @@ describe("prompt size constraints for 0.2.0", () => {
 });
 
 describe("task prompt content", () => {
-  it("no task prompt mentions tool names directly", () => {
+  it("no task prompt contains any tool name as whole word (all 11 tools, all 16 tasks)", () => {
     const toolNames = getToolsV2Schemas().map((t) => t.name);
+    expect(toolNames.length).toBe(11);
+    expect(TASKS_V2.length).toBe(16);
     
+    const violations: string[] = [];
     for (const task of TASKS_V2) {
-      if (task.expectedTools === undefined) {
-        continue;
-      }
-      
       for (const toolName of toolNames) {
         const pattern = new RegExp(`\\b${toolName}\\b`, "i");
-        if (task.prompt.match(pattern)) {
-          if (task.expectedTools.includes(toolName)) {
-            continue;
-          }
-          expect.fail(`Task ${task.id} mentions tool ${toolName} in prompt`);
+        if (pattern.test(task.prompt)) {
+          violations.push(`Task "${task.id}" contains tool name "${toolName}"`);
         }
       }
+    }
+    
+    if (violations.length > 0) {
+      expect.fail(`Tool name violations:\n${violations.join("\n")}`);
     }
   });
 

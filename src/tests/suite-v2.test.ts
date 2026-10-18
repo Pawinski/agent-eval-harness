@@ -48,6 +48,21 @@ describe("suite 0.2.0 fixture answers", () => {
       expect(task.fixtureAnswer!.trim().length).toBeGreaterThan(0);
     }
   });
+
+  it("patch tasks accept any case with optional trailing period", () => {
+    const patchTasks = TASKS_V2.filter((t) => t.category === "patch");
+    expect(patchTasks.length).toBe(3);
+    
+    for (const task of patchTasks) {
+      expect(runCheck("fixed", 0, task.check).pass).toBe(true);
+      expect(runCheck("Fixed", 0, task.check).pass).toBe(true);
+      expect(runCheck("FIXED", 0, task.check).pass).toBe(false);
+      expect(runCheck("fixed.", 0, task.check).pass).toBe(true);
+      expect(runCheck("Fixed.", 0, task.check).pass).toBe(true);
+      expect(runCheck("fixed!", 0, task.check).pass).toBe(false);
+      expect(runCheck("notfixed", 0, task.check).pass).toBe(false);
+    }
+  });
 });
 
 describe("suite 0.2.0 task metadata", () => {

@@ -92,7 +92,9 @@ export function createReadFileTool(): McpToolSchema & { handler: ToolHandler } {
 
       try {
         const content = readFileSync(fullPath, "utf8");
-        return { ok: true, content };
+        const lines = content.split("\n");
+        const numbered = lines.map((line, i) => `${String(i + 1).padStart(3, " ")}| ${line}`).join("\n");
+        return { ok: true, content: numbered };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return { ok: false, content: "", error: msg };
@@ -104,7 +106,7 @@ export function createReadFileTool(): McpToolSchema & { handler: ToolHandler } {
 export function createApplyPatchTool(ctx: ToolsV2Context): McpToolSchema & { handler: ToolHandler } {
   return {
     name: "apply_patch",
-    description: "Apply a unified diff patch to a fixture file in memory. Use old_line and new_line for single-line replacement.",
+    description: "Replace a line in a fixture file in memory. Use old_line to match and new_line to replace.",
     inputSchema: {
       type: "object",
       properties: {
@@ -288,8 +290,13 @@ export function createCsvQueryTool(): McpToolSchema & { handler: ToolHandler } {
         if (filter) {
           const match = filter.match(/^(\w+)\s*=\s*(.+)$/);
           if (match) {
-            const [, col, val] = match;
-            rows = rows.filter((r) => r[col] === val);
+            const [, col, rawVal] = match;
+            const val = rawVal.replace(/^["']|["']$/g, "").trim();
+            const beforeCount = rows.length;
+            rows = rows.filter((r) => r[col]?.toLowerCase() === val.toLowerCase());
+            if (rows.length === 0 && beforeCount > 0) {
+              return { ok: false, content: "", error: `no rows match filter: ${col}=${val}` };
+            }
           }
         }
 
@@ -337,35 +344,6 @@ export function createCsvQueryTool(): McpToolSchema & { handler: ToolHandler } {
   };
 }
 
-export function createErrorRecoveryTool(
-  ctx: ToolsV2Context,
-  toolName: string,
-  successHandler: ToolHandler,
-): McpToolSchema & { handler: ToolHandler } {
-  return {
-    name: toolName,
-    description: `Tool that fails once with ERROR on first call, then succeeds. Used for error recovery testing.`,
-    inputSchema: {
-      type: "object",
-      properties: {
-        input: { type: "string" },
-      },
-      required: ["input"],
-    },
-    handler: (args) => {
-      const key = `${toolName}:${JSON.stringify(args)}`;
-      const count = ctx.errorRecoveryState.errorCounts.get(key) ?? 0;
-      
-      if (count === 0) {
-        ctx.errorRecoveryState.errorCounts.set(key, 1);
-        return { ok: false, content: "", error: "ERROR: temporary failure, retry with same input" };
-      }
-      
-      return successHandler(args);
-    },
-  };
-}
-
 export function createFlakySumTool(ctx: ToolsV2Context): McpToolSchema & { handler: ToolHandler } {
   return {
     name: "flaky_sum",
@@ -386,7 +364,7 @@ export function createFlakySumTool(ctx: ToolsV2Context): McpToolSchema & { handl
       
       if (count === 0) {
         ctx.errorRecoveryState.errorCounts.set(key, 1);
-        return { ok: false, content: "", error: "ERROR: service temporarily unavailable, please retry" };
+        return { ok: false, content: "", error: "service temporarily unavailable, please retry" };
       }
       
       const sum = a + b;
@@ -419,7 +397,7 @@ export function createFlakyLookupTool(ctx: ToolsV2Context): McpToolSchema & { ha
       
       if (count === 0) {
         ctx.errorRecoveryState.errorCounts.set(key, 1);
-        return { ok: false, content: "", error: "ERROR: connection timeout, please retry" };
+        return { ok: false, content: "", error: "connection timeout, please retry" };
       }
       
       const name = data[sku];
@@ -437,7 +415,7 @@ export function getToolsV2Schemas(): McpToolSchema[] {
   const v1Schemas = getDefaultToolDefinitions().map(({ handler: _h, ...schema }) => schema);
   const v2Schemas: McpToolSchema[] = [
     { name: "read_file", description: "Read a fixture file by relative path (e.g. code/calculator.ts). Returns file contents.", inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
-    { name: "apply_patch", description: "Apply a unified diff patch to a fixture file in memory. Use old_line and new_line for single-line replacement.", inputSchema: { type: "object", properties: { path: { type: "string" }, old_line: { type: "string" }, new_line: { type: "string" } }, required: ["path", "old_line", "new_line"] } },
+    { name: "apply_patch", description: "Replace a line in a fixture file in memory. Use old_line to match and new_line to replace.", inputSchema: { type: "object", properties: { path: { type: "string" }, old_line: { type: "string" }, new_line: { type: "string" } }, required: ["path", "old_line", "new_line"] } },
     { name: "run_check", description: "Run a fixture check on a patched file. Returns exit code 0 on success, 1 on failure.", inputSchema: { type: "object", properties: { path: { type: "string" }, check: { type: "string" } }, required: ["path", "check"] } },
     { name: "csv_query", description: "Query a CSV fixture file. Supports filter (column=value) and aggregate (sum:column, count, avg:column).", inputSchema: { type: "object", properties: { path: { type: "string" }, filter: { type: "string" }, aggregate: { type: "string" }, select: { type: "string" } }, required: ["path"] } },
     { name: "flaky_sum", description: "Sum two numbers. May fail on first attempt - retry on error.", inputSchema: { type: "object", properties: { a: { type: "number" }, b: { type: "number" } }, required: ["a", "b"] } },

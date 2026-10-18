@@ -19,6 +19,7 @@ export function compute(x: number): number {
   return result;
 }
 
+// Factorial implementation
 export function factorial(n: number): number {
   if (n < 0) {
     throw new Error("negative input");
