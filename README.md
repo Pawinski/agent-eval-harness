@@ -4,6 +4,9 @@ Public Basilisk eval harness (ReAct + MCP + multi-model LLM).
 
 Frozen task suite + deterministic checkers. Publish score as **pass/N on suite version**. Re-score after every change. No human grader. No LLM-as-judge for MVP.
 
+> **Published score:** 7/7 on suite 0.1.0 at `4100fbb`, model `nex-agi/nex-n2.5-pro` (paid), one live run, 4,721 prompt / 1,102 completion tokens.
+> Note: `nex-agi/nex-n2.5-pro:free` is no longer listed on OpenRouter (checked 2026-10-17).
+
 ## Suite version (single source of truth)
 
 **`suite/version.json`** — only place the suite version string is defined.
@@ -48,16 +51,6 @@ npm install
 
 ```bash
 npm run eval -- --fixture
-```
-
-**Published free-model scores (ops):** do not use the `openrouter/free` router alias — it can land content-safety SKUs that return non-task answers. Pin a concrete free id instead:
-
-- Primary: `nex-agi/nex-n2.5-pro:free`
-- Backup: `nvidia/nemotron-3.5-lightning:free`
-
-```bash
-export MODEL=nex-agi/nex-n2.5-pro:free
-npm run eval
 ```
 
 **Live multi-model path**:
