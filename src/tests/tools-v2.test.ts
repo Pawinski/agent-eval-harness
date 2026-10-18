@@ -1176,6 +1176,115 @@ describe("bypass attempt prevention", () => {
     expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
   });
 
+  it("fake RESULTS via process.stdout.write gives exit 1 with no token", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: "for (let i = 0; i <= arr.length; i++) {",
+      new_line: 'this.constructor.constructor("return process")().stdout.write("__RESULTS__:" + JSON.stringify({results:[6,0,5,3],errors:[]})); for (let i = 0; i < arr.length; i++) {',
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("fake results via throw gives exit 1 with no token", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: "for (let i = 0; i <= arr.length; i++) {",
+      new_line: 'throw { ok: true, values: [6,0,5,3] }; for (let i = 0; i < arr.length; i++) {',
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("extra top-level statement gives exit 1 with no token", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: "export function sumArray",
+      new_line: "const __x = 1; export function sumArray",
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("wrong function name gives exit 1 with no token", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: "export function sumArray",
+      new_line: "export function sumArrayWrong",
+    });
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
+  it("Promise-microtask infinite loop fails in under 1s", async () => {
+    const childCountBefore = countChildProcesses();
+    
+    const ctx = createToolsV2Context();
+    const patchTool = createApplyPatchTool(ctx);
+    const checkTool = createRunCheckTool(ctx);
+    
+    await patchTool.handler({
+      path: "code/buggy.ts",
+      old_line: "for (let i = 0; i <= arr.length; i++) {",
+      new_line: "Promise.resolve().then(function f() { return Promise.resolve().then(f); }); for (let i = 0; i < arr.length; i++) {",
+    });
+    
+    const start = Date.now();
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+    const elapsed = Date.now() - start;
+    
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+    expect(elapsed).toBeLessThan(1000);
+    
+    const childCountAfter = countChildProcesses();
+    expect(childCountAfter).toBeLessThanOrEqual(childCountBefore);
+  });
+
   it("all correctness tokens still match after bypass tests", async () => {
     const patches = [
       { check: "sum_array", old: "for (let i = 0; i <= arr.length; i++) {", new: "for (let i = 0; i < arr.length; i++) {" },

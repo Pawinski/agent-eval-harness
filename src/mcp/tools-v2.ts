@@ -408,47 +408,49 @@ process.stdin.on("end", () => {
     const { code, funcName, inputs } = JSON.parse(input);
     const ctx = vm.createContext(Object.create(null), {
       codeGeneration: { strings: false, wasm: false },
+      microtaskMode: "afterEvaluate",
     });
     
-    // Step 1: Harness prelude - capture JSON.stringify before any patch code runs
-    const prelude = new vm.Script(\`
-      const __safeStringify = JSON.stringify.bind(JSON);
-      const __results = [];
-      const __errors = [];
-    \`);
-    prelude.runInContext(ctx, { timeout: 50 });
+    // Capture safe references BEFORE any untrusted code runs
+    // These are kept on host side, not exposed to context
+    const safeStringify = JSON.stringify.bind(JSON);
+    const results = [];
+    const errors = [];
     
-    // Step 2: Run the patched function source standalone (no wrapper)
+    // Step 1: Run the patched function source standalone (no wrapper)
     const funcScript = new vm.Script(code);
     funcScript.runInContext(ctx, { timeout: 50 });
     
-    // Step 3: Call script - invoke function on each input
-    const inputsJson = JSON.stringify(inputs);
+    // Step 2: Call script - invoke function on each input
+    // Results collected via return value, not context globals
+    const inputsJson = safeStringify(inputs);
     const callScript = new vm.Script(\`
       (function() {
         const __inputs = JSON.parse('\${inputsJson.replace(/\\\\/g, "\\\\\\\\").replace(/'/g, "\\\\'")}');
         const __func = \${funcName};
         if (typeof __func !== "function") {
-          __errors.push("not a function");
-          return;
+          return { ok: false, error: "not a function" };
         }
+        const __out = [];
         for (let __i = 0; __i < __inputs.length; __i++) {
           try {
-            __results.push(__func(__inputs[__i]));
+            __out.push(__func(__inputs[__i]));
           } catch (e) {
-            __errors.push("error:" + __i);
-            return;
+            return { ok: false, error: "error:" + __i };
           }
         }
+        return { ok: true, values: __out };
       })();
     \`);
-    callScript.runInContext(ctx, { timeout: 100 });
+    const callResult = callScript.runInContext(ctx, { timeout: 100 });
     
-    // Step 4: Serialize results using the safe stringify captured in prelude
-    const outputScript = new vm.Script(\`__safeStringify({ results: __results, errors: __errors })\`);
-    const output = outputScript.runInContext(ctx, { timeout: 50 });
+    if (!callResult || !callResult.ok) {
+      errors.push(callResult?.error || "unknown");
+    } else if (Array.isArray(callResult.values)) {
+      results.push(...callResult.values);
+    }
     
-    console.log("${RESULT_PREFIX}" + output);
+    console.log("${RESULT_PREFIX}" + safeStringify({ results, errors }));
   } catch {}
 });
 `;
