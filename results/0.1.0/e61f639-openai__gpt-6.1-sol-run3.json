@@ -1,0 +1,13 @@
+{
+  "sha": "e61f639f089fd22a8e356a4ac29d102bea6e787c",
+  "suite": "0.1.0",
+  "model": "openai/gpt-6.1-sol",
+  "run_n": 3,
+  "pass": 6,
+  "total": 7,
+  "tokens_in": 3225,
+  "tokens_out": 1051,
+  "tokens_cached": 0,
+  "cost_usd": 0.016960000000000003,
+  "date": "2026-10-18"
+}

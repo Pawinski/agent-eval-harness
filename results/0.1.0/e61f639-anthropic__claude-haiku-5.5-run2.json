@@ -1,0 +1,13 @@
+{
+  "sha": "e61f639f089fd22a8e356a4ac29d102bea6e787c",
+  "suite": "0.1.0",
+  "model": "anthropic/claude-haiku-5.5",
+  "run_n": 2,
+  "pass": 7,
+  "total": 7,
+  "tokens_in": 4222,
+  "tokens_out": 667,
+  "tokens_cached": 0,
+  "cost_usd": 0.0007557,
+  "date": "2026-10-18"
+}
