@@ -152,8 +152,8 @@ The loop condition causes an array index out-of-bounds error.
 Fix the bug by patching the file, then verify the array summation logic passes.
 Report the verification token from a passing check, or "failed" if it does not pass.`,
     expectedTools: ["read_file", "apply_patch", "run_check"],
-    check: { kind: "exact", expected: "33620b5a" },
-    fixtureAnswer: "33620b5a",
+    check: { kind: "exact", expected: "86d9c6a6" },
+    fixtureAnswer: "86d9c6a6",
     maxSteps: 10,
   },
   {
@@ -165,8 +165,8 @@ The comparison operator is wrong.
 Fix the bug by patching the file, then verify the maximum-finding logic passes.
 Report the verification token from a passing check, or "failed" if it does not pass.`,
     expectedTools: ["read_file", "apply_patch", "run_check"],
-    check: { kind: "exact", expected: "f29878c5" },
-    fixtureAnswer: "f29878c5",
+    check: { kind: "exact", expected: "fee3b425" },
+    fixtureAnswer: "fee3b425",
     maxSteps: 10,
   },
   {
@@ -177,8 +177,8 @@ Report the verification token from a passing check, or "failed" if it does not p
 Fix the punctuation by patching the file, then verify the greeting logic passes.
 Report the verification token from a passing check, or "failed" if it does not pass.`,
     expectedTools: ["read_file", "apply_patch", "run_check"],
-    check: { kind: "exact", expected: "822a5a68" },
-    fixtureAnswer: "822a5a68",
+    check: { kind: "exact", expected: "186712ae" },
+    fixtureAnswer: "186712ae",
     maxSteps: 10,
   },
 

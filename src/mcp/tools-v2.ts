@@ -7,8 +7,12 @@ import { createHash } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import * as vm from "node:vm";
+import { transpileModule, ModuleKind, ScriptTarget } from "typescript";
 import type { McpToolResult, McpToolSchema, InProcessMcpOptions } from "./client.js";
 import { getDefaultToolDefinitions } from "./client.js";
+
+const VERIFICATION_SALT = "v020-check-7f3a9c";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_ROOT = path.resolve(__dirname, "../../fixtures");
@@ -107,7 +111,7 @@ export function createReadFileTool(): McpToolSchema & { handler: ToolHandler } {
 export function createApplyPatchTool(ctx: ToolsV2Context): McpToolSchema & { handler: ToolHandler } {
   return {
     name: "apply_patch",
-    description: "Replace a line in a fixture file (path, old_line: line to find, new_line: replacement). Matching ignores leading/trailing whitespace.",
+    description: "Replace a line in a fixture file (path, old_line: line to find, new_line: replacement). Matching ignores leading/trailing whitespace; line-number prefixes from read_file are ignored.",
     inputSchema: {
       type: "object",
       properties: {
@@ -119,8 +123,10 @@ export function createApplyPatchTool(ctx: ToolsV2Context): McpToolSchema & { han
     },
     handler: (args) => {
       const relativePath = String(args.path ?? "");
-      const oldLine = String(args.old_line ?? "");
+      let oldLine = String(args.old_line ?? "");
       const newLine = String(args.new_line ?? "");
+      
+      oldLine = oldLine.replace(/^\s*\d+\|\s?/, "");
 
       if (!relativePath || !oldLine) {
         return { ok: false, content: "", error: "path and old_line are required" };
@@ -230,12 +236,14 @@ function extractFunctionSource(content: string, funcName: string): string {
   let braceCount = 0;
   const funcLines: string[] = [];
   
+  const funcPattern = new RegExp(`\\bfunction\\s+${funcName}\\s*\\(`);
+  
   for (const line of lines) {
-    if (!inFunc && line.includes(`function ${funcName}`)) {
+    if (!inFunc && funcPattern.test(line)) {
       inFunc = true;
     }
     if (inFunc) {
-      funcLines.push(line);
+      funcLines.push(line.replace(/^export\s+/, ""));
       braceCount += (line.match(/\{/g) || []).length;
       braceCount -= (line.match(/\}/g) || []).length;
       if (braceCount === 0 && funcLines.length > 0) {
@@ -246,59 +254,122 @@ function extractFunctionSource(content: string, funcName: string): string {
   return funcLines.join("\n");
 }
 
-function computeVerificationToken(checkName: string, fixedSource: string): string {
+function transpileToJs(tsCode: string): string {
+  const result = transpileModule(tsCode, {
+    compilerOptions: {
+      module: ModuleKind.CommonJS,
+      target: ScriptTarget.ES2020,
+      strict: false,
+    },
+  });
+  return result.outputText;
+}
+
+function computeFixedToken(checkName: string): string {
   const hash = createHash("sha256");
-  hash.update(`${checkName}:${fixedSource}`);
+  hash.update(`suite-0.2.0:${checkName}:${VERIFICATION_SALT}`);
   return hash.digest("hex").slice(0, 8);
 }
 
-function runFixtureCheck(content: string, checkName: string, wasPatched: boolean): CheckResult {
-  switch (checkName) {
-    case "sum_array": {
-      const hasBug = content.includes("i <= arr.length");
-      if (hasBug) {
-        return { exitCode: 1, passed: false, message: "check failed" };
-      }
-      if (!wasPatched) {
-        return { exitCode: 1, passed: false, message: "check failed" };
-      }
-      const funcSource = extractFunctionSource(content, "sumArray");
-      const token = computeVerificationToken(checkName, funcSource);
-      return { exitCode: 0, passed: true, message: "check passed", token };
+interface TestCase<T, R> {
+  input: T;
+  expected: R;
+}
+
+function runBehaviorCheck(
+  jsCode: string,
+  funcName: string,
+  testCases: TestCase<unknown, unknown>[],
+  timeoutMs = 100
+): boolean {
+  try {
+    const context = vm.createContext({});
+    const script = new vm.Script(`${jsCode}\n;${funcName};`);
+    const func = script.runInContext(context, { timeout: timeoutMs }) as (...args: unknown[]) => unknown;
+    
+    if (typeof func !== "function") {
+      return false;
     }
-    case "find_max": {
-      const hasBug = content.includes("arr[i] < max");
-      if (hasBug) {
-        return { exitCode: 1, passed: false, message: "check failed" };
+    
+    for (const tc of testCases) {
+      try {
+        const result = func(tc.input);
+        if (result !== tc.expected) {
+          return false;
+        }
+      } catch {
+        return false;
       }
-      if (!wasPatched) {
-        return { exitCode: 1, passed: false, message: "check failed" };
-      }
-      const funcSource = extractFunctionSource(content, "findMax");
-      const token = computeVerificationToken(checkName, funcSource);
-      return { exitCode: 0, passed: true, message: "check passed", token };
     }
-    case "greet": {
-      const hasBug = content.includes('+ "?"');
-      if (hasBug) {
-        return { exitCode: 1, passed: false, message: "check failed" };
-      }
-      if (!wasPatched) {
-        return { exitCode: 1, passed: false, message: "check failed" };
-      }
-      const funcSource = extractFunctionSource(content, "greet");
-      const token = computeVerificationToken(checkName, funcSource);
-      return { exitCode: 0, passed: true, message: "check passed", token };
-    }
-    default:
-      return { exitCode: 1, passed: false, message: `unknown check: ${checkName}` };
+    return true;
+  } catch {
+    return false;
   }
+}
+
+const CHECK_TEST_CASES: Record<string, { funcName: string; tests: TestCase<unknown, unknown>[] }> = {
+  sum_array: {
+    funcName: "sumArray",
+    tests: [
+      { input: [1, 2, 3], expected: 6 },
+      { input: [], expected: 0 },
+      { input: [5], expected: 5 },
+      { input: [-1, 4], expected: 3 },
+    ],
+  },
+  find_max: {
+    funcName: "findMax",
+    tests: [
+      { input: [3, 9, 2], expected: 9 },
+      { input: [5], expected: 5 },
+      { input: [-3, -1, -7], expected: -1 },
+      { input: [2, 2], expected: 2 },
+    ],
+  },
+  greet: {
+    funcName: "greet",
+    tests: [
+      { input: "A", expected: "Hello, A!" },
+      { input: "World", expected: "Hello, World!" },
+    ],
+  },
+};
+
+function runFixtureCheck(content: string, checkName: string, wasPatched: boolean): CheckResult {
+  if (!wasPatched) {
+    return { exitCode: 1, passed: false, message: "check failed" };
+  }
+  
+  const checkConfig = CHECK_TEST_CASES[checkName];
+  if (!checkConfig) {
+    return { exitCode: 1, passed: false, message: `unknown check: ${checkName}` };
+  }
+  
+  const funcSource = extractFunctionSource(content, checkConfig.funcName);
+  if (!funcSource) {
+    return { exitCode: 1, passed: false, message: "check failed" };
+  }
+  
+  let jsCode: string;
+  try {
+    jsCode = transpileToJs(funcSource);
+  } catch {
+    return { exitCode: 1, passed: false, message: "check failed" };
+  }
+  
+  const passed = runBehaviorCheck(jsCode, checkConfig.funcName, checkConfig.tests);
+  if (!passed) {
+    return { exitCode: 1, passed: false, message: "check failed" };
+  }
+  
+  const token = computeFixedToken(checkName);
+  return { exitCode: 0, passed: true, message: "check passed", token };
 }
 
 export function createCsvQueryTool(): McpToolSchema & { handler: ToolHandler } {
   return {
     name: "csv_query",
-    description: "Query a CSV file (path). Options: filter as column=value, aggregate as sum:column or avg:column or count.",
+    description: "Query a CSV file (path). Options: filter as column=value, aggregate as sum:column or avg:column or count, select as comma-separated columns.",
     inputSchema: {
       type: "object",
       properties: {

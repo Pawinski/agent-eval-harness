@@ -169,6 +169,8 @@ npm run matrix -- --suite 0.2.0 --fixture
 
 Suite 0.2.0 introduces 6 new tools (11 total): `read_file`, `apply_patch`, `run_check`, `csv_query`, `flaky_sum`, `flaky_lookup`. Chain and selection tasks see the full 11-tool catalog; other tasks see only their listed subset (via `expectedTools`).
 
+**Scoring**: Every task, including selection tasks, is scored on the final answer only. The `expectedTools` field limits the visible tool catalog but does not affect scoring.
+
 ### Suite 0.2.0 defaults
 
 - **Tasks**: 16

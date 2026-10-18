@@ -80,6 +80,20 @@ describe("apply_patch tool", () => {
     expect(ctx.patchState.patched.has("code/buggy.ts")).toBe(true);
   });
 
+  it("strips line-number prefix from old_line when matching", async () => {
+    const tool = createApplyPatchTool(ctx);
+    const result = await tool.handler({
+      path: "code/buggy.ts",
+      old_line: "  7| for (let i = 0; i <= arr.length; i++) {",
+      new_line: "for (let i = 0; i < arr.length; i++) {",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.content).toBe("patch applied");
+    const patched = ctx.patchState.patched.get("code/buggy.ts");
+    expect(patched).toContain("i < arr.length");
+    expect(patched).not.toContain("  7|");
+  });
+
   it("stores original content before patching", async () => {
     const tool = createApplyPatchTool(ctx);
     await tool.handler({
@@ -530,7 +544,13 @@ describe("tool state isolation per task", () => {
   });
 });
 
-describe("patch verification token mechanism", () => {
+describe("patch verification token mechanism (behavior-based)", () => {
+  const EXPECTED_TOKENS = {
+    sum_array: "86d9c6a6",
+    find_max: "fee3b425",
+    greet: "186712ae",
+  };
+
   it("(a) answering 'fixed' without patching scores 0/3 - no token returned", async () => {
     const ctx = createToolsV2Context();
     const checkTool = createRunCheckTool(ctx);
@@ -548,23 +568,216 @@ describe("patch verification token mechanism", () => {
     expect(r3.content).not.toContain("verification");
   });
 
-  it("(b) correct patch returns token", async () => {
-    const ctx = createToolsV2Context();
-    const patchTool = createApplyPatchTool(ctx);
-    const checkTool = createRunCheckTool(ctx);
-    
-    await patchTool.handler({
-      path: "code/buggy.ts",
-      old_line: "for (let i = 0; i <= arr.length; i++) {",
-      new_line: "for (let i = 0; i < arr.length; i++) {",
+  describe("(b) correct patches return expected token", () => {
+    it("sum_array correct patch", async () => {
+      const ctx = createToolsV2Context();
+      const patchTool = createApplyPatchTool(ctx);
+      const checkTool = createRunCheckTool(ctx);
+      
+      await patchTool.handler({
+        path: "code/buggy.ts",
+        old_line: "for (let i = 0; i <= arr.length; i++) {",
+        new_line: "for (let i = 0; i < arr.length; i++) {",
+      });
+      
+      const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+      expect(result.content).toContain("exit 0");
+      expect(result.content).toContain(`verification: ${EXPECTED_TOKENS.sum_array}`);
     });
-    
-    const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
-    expect(result.content).toContain("exit 0");
-    expect(result.content).toContain("verification: 33620b5a");
+
+    it("find_max correct patch", async () => {
+      const ctx = createToolsV2Context();
+      const patchTool = createApplyPatchTool(ctx);
+      const checkTool = createRunCheckTool(ctx);
+      
+      await patchTool.handler({
+        path: "code/buggy.ts",
+        old_line: "if (arr[i] < max) {",
+        new_line: "if (arr[i] > max) {",
+      });
+      
+      const result = await checkTool.handler({ path: "code/buggy.ts", check: "find_max" });
+      expect(result.content).toContain("exit 0");
+      expect(result.content).toContain(`verification: ${EXPECTED_TOKENS.find_max}`);
+    });
+
+    it("greet correct patch", async () => {
+      const ctx = createToolsV2Context();
+      const patchTool = createApplyPatchTool(ctx);
+      const checkTool = createRunCheckTool(ctx);
+      
+      await patchTool.handler({
+        path: "code/buggy.ts",
+        old_line: 'return "Hello, " + name + "?";',
+        new_line: 'return "Hello, " + name + "!";',
+      });
+      
+      const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+      expect(result.content).toContain("exit 0");
+      expect(result.content).toContain(`verification: ${EXPECTED_TOKENS.greet}`);
+    });
   });
 
-  it("(c) deleting buggy line instead of fixing it still fails", async () => {
+  describe("(c) deleting buggy line gives exit 1 and no token", () => {
+    it("sum_array delete line fails", async () => {
+      const ctx = createToolsV2Context();
+      const patchTool = createApplyPatchTool(ctx);
+      const checkTool = createRunCheckTool(ctx);
+      
+      await patchTool.handler({
+        path: "code/buggy.ts",
+        old_line: "for (let i = 0; i <= arr.length; i++) {",
+        new_line: "",
+      });
+      
+      const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+      expect(result.content).toBe("exit 1");
+      expect(result.content).not.toContain("verification");
+    });
+
+    it("find_max delete line fails", async () => {
+      const ctx = createToolsV2Context();
+      const patchTool = createApplyPatchTool(ctx);
+      const checkTool = createRunCheckTool(ctx);
+      
+      await patchTool.handler({
+        path: "code/buggy.ts",
+        old_line: "if (arr[i] < max) {",
+        new_line: "",
+      });
+      
+      const result = await checkTool.handler({ path: "code/buggy.ts", check: "find_max" });
+      expect(result.content).toBe("exit 1");
+      expect(result.content).not.toContain("verification");
+    });
+
+    it("greet delete line fails", async () => {
+      const ctx = createToolsV2Context();
+      const patchTool = createApplyPatchTool(ctx);
+      const checkTool = createRunCheckTool(ctx);
+      
+      await patchTool.handler({
+        path: "code/buggy.ts",
+        old_line: 'return "Hello, " + name + "?";',
+        new_line: "",
+      });
+      
+      const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+      expect(result.content).toBe("exit 1");
+      expect(result.content).not.toContain("verification");
+    });
+  });
+
+  describe("wrong fixes give exit 1 and no token", () => {
+    it("sum_array wrong fix (i < arr.length - 1)", async () => {
+      const ctx = createToolsV2Context();
+      const patchTool = createApplyPatchTool(ctx);
+      const checkTool = createRunCheckTool(ctx);
+      
+      await patchTool.handler({
+        path: "code/buggy.ts",
+        old_line: "for (let i = 0; i <= arr.length; i++) {",
+        new_line: "for (let i = 0; i < arr.length - 1; i++) {",
+      });
+      
+      const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+      expect(result.content).toBe("exit 1");
+      expect(result.content).not.toContain("verification");
+    });
+
+    it("find_max wrong fix (<=)", async () => {
+      const ctx = createToolsV2Context();
+      const patchTool = createApplyPatchTool(ctx);
+      const checkTool = createRunCheckTool(ctx);
+      
+      await patchTool.handler({
+        path: "code/buggy.ts",
+        old_line: "if (arr[i] < max) {",
+        new_line: "if (arr[i] <= max) {",
+      });
+      
+      const result = await checkTool.handler({ path: "code/buggy.ts", check: "find_max" });
+      expect(result.content).toBe("exit 1");
+      expect(result.content).not.toContain("verification");
+    });
+
+    it("greet wrong fix (period)", async () => {
+      const ctx = createToolsV2Context();
+      const patchTool = createApplyPatchTool(ctx);
+      const checkTool = createRunCheckTool(ctx);
+      
+      await patchTool.handler({
+        path: "code/buggy.ts",
+        old_line: 'return "Hello, " + name + "?";',
+        new_line: 'return "Hello, " + name + ".";',
+      });
+      
+      const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+      expect(result.content).toBe("exit 1");
+      expect(result.content).not.toContain("verification");
+    });
+  });
+
+  describe("valid alternative fixes give exit 0 and EXACTLY the expected token", () => {
+    it("sum_array alternative (i <= arr.length - 1)", async () => {
+      const ctx = createToolsV2Context();
+      const patchTool = createApplyPatchTool(ctx);
+      const checkTool = createRunCheckTool(ctx);
+      
+      await patchTool.handler({
+        path: "code/buggy.ts",
+        old_line: "for (let i = 0; i <= arr.length; i++) {",
+        new_line: "for (let i = 0; i <= arr.length - 1; i++) {",
+      });
+      
+      const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+      expect(result.content).toContain("exit 0");
+      expect(result.content).toContain(`verification: ${EXPECTED_TOKENS.sum_array}`);
+    });
+
+    it("find_max alternative (max < arr[i])", async () => {
+      const ctx = createToolsV2Context();
+      const patchTool = createApplyPatchTool(ctx);
+      const checkTool = createRunCheckTool(ctx);
+      
+      await patchTool.handler({
+        path: "code/buggy.ts",
+        old_line: "if (arr[i] < max) {",
+        new_line: "if (max < arr[i]) {",
+      });
+      
+      const result = await checkTool.handler({ path: "code/buggy.ts", check: "find_max" });
+      expect(result.content).toContain("exit 0");
+      expect(result.content).toContain(`verification: ${EXPECTED_TOKENS.find_max}`);
+    });
+
+    it("greet alternative (template literal)", async () => {
+      const ctx = createToolsV2Context();
+      const patchTool = createApplyPatchTool(ctx);
+      const checkTool = createRunCheckTool(ctx);
+      
+      await patchTool.handler({
+        path: "code/buggy.ts",
+        old_line: 'return "Hello, " + name + "?";',
+        new_line: "return `Hello, ${name}!`;",
+      });
+      
+      const result = await checkTool.handler({ path: "code/buggy.ts", check: "greet" });
+      expect(result.content).toContain("exit 0");
+      expect(result.content).toContain(`verification: ${EXPECTED_TOKENS.greet}`);
+    });
+  });
+
+  it("unpatched file gives exit 1", async () => {
+    const ctx = createToolsV2Context();
+    const checkTool = createRunCheckTool(ctx);
+    
+    const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
+  });
+
+  it("infinite-loop patch times out to exit 1", async () => {
     const ctx = createToolsV2Context();
     const patchTool = createApplyPatchTool(ctx);
     const checkTool = createRunCheckTool(ctx);
@@ -572,12 +785,12 @@ describe("patch verification token mechanism", () => {
     await patchTool.handler({
       path: "code/buggy.ts",
       old_line: "for (let i = 0; i <= arr.length; i++) {",
-      new_line: "",
+      new_line: "while (true) {",
     });
     
     const result = await checkTool.handler({ path: "code/buggy.ts", check: "sum_array" });
-    expect(result.content).toContain("exit 0");
-    expect(result.content).toContain("verification:");
+    expect(result.content).toBe("exit 1");
+    expect(result.content).not.toContain("verification");
   });
 
   it("(d) token is stable across fresh contexts", async () => {
@@ -602,7 +815,7 @@ describe("patch verification token mechanism", () => {
     
     expect(tokens[0]).toBe(tokens[1]);
     expect(tokens[1]).toBe(tokens[2]);
-    expect(tokens[0]).toBe("33620b5a");
+    expect(tokens[0]).toBe(EXPECTED_TOKENS.sum_array);
   });
 
   it("(e) token differs per task", async () => {
@@ -625,9 +838,9 @@ describe("patch verification token mechanism", () => {
       tokens[p.check] = match![1];
     }
     
-    expect(tokens["sum_array"]).toBe("33620b5a");
-    expect(tokens["find_max"]).toBe("f29878c5");
-    expect(tokens["greet"]).toBe("822a5a68");
+    expect(tokens["sum_array"]).toBe(EXPECTED_TOKENS.sum_array);
+    expect(tokens["find_max"]).toBe(EXPECTED_TOKENS.find_max);
+    expect(tokens["greet"]).toBe(EXPECTED_TOKENS.greet);
     expect(tokens["sum_array"]).not.toBe(tokens["find_max"]);
     expect(tokens["find_max"]).not.toBe(tokens["greet"]);
   });
