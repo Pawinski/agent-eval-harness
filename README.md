@@ -65,4 +65,4 @@ are in [results/0.1.0/](results/0.1.0/).
 
 ## License
 
-MIT
+[MIT](LICENSE)

@@ -34,7 +34,7 @@ Dry-run without a key (no `--fixture`) uses a stub LLM and is expected to fail m
 
 | Layer | Choice |
 |--------|--------|
-| Language | TypeScript (Node ≥ 20) |
+| Language | TypeScript (Node ≥ 22) |
 | Agent | Minimal **ReAct** loop (Thought / Action / Observation) |
 | Tools | **MCP**-shaped tool client (in-process stubs; swappable for real MCP) |
 | LLM | OpenRouter-style **multi-model** client (`OPENROUTER_API_KEY`, pluggable `MODEL`) |
