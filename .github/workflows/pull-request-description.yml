@@ -1,0 +1,26 @@
+name: Pull request description
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  description:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check pull request description
+        env:
+          PULL_REQUEST_BODY: ${{ github.event.pull_request.body }}
+        run: npx tsx src/pullRequestDescriptionCheck.ts
