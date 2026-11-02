@@ -57,6 +57,13 @@ export function checkPullRequestDescription(body: string): string[] {
     if (!costRows.some((row) => row.startsWith("| financial impact"))) {
       problems.push("The Cost table is missing the Financial impact ($) row.");
     }
+    for (const row of costRows) {
+      if (!row.startsWith("| usage cost") && !row.startsWith("| financial impact")) continue;
+      const cells = row.split("|").slice(2, -1).map((cell) => cell.trim());
+      if (cells.some((cell) => cell === "" || /^n\/a[\s:—–-]*$/.test(cell))) {
+        problems.push(`A dollar row is blank or a bare "n/a" with no reason: ${row}`);
+      }
+    }
   }
   const firstHeading = Math.min(...positions.filter((position) => position !== -1));
   if (Number.isFinite(firstHeading)) {

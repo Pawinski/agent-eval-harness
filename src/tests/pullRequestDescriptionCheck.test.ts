@@ -63,4 +63,16 @@ describe("checkPullRequestDescription", () => {
     const problems = checkPullRequestDescription(validBody.replace("| Tokens | 1k | 1k |", "| Tokens | <range> | <measured> |"));
     expect(problems.some((problem) => problem.startsWith("Unfilled <...> placeholder"))).toBe(true);
   });
+  it("passes rate pending in the Usage cost row", () => {
+    const body = validBody.replace("| Usage cost ($) | 0.10 | 0.10 |", "| Usage cost ($) | rate pending: about 10k tokens | rate pending: about 12k tokens |");
+    expect(checkPullRequestDescription(body)).toEqual([]);
+  });
+  it("fails on a bare n/a dollar row", () => {
+    const body = validBody.replace("| Financial impact ($) | 0, docs only | n/a until known |", "| Financial impact ($) | n/a | n/a |");
+    expect(checkPullRequestDescription(body).some((problem) => problem.includes("bare"))).toBe(true);
+  });
+  it("passes n/a with a reason in a dollar row", () => {
+    const body = validBody.replace("| Financial impact ($) | 0, docs only | n/a until known |", "| Financial impact ($) | n/a: process change | n/a: process change |");
+    expect(checkPullRequestDescription(body)).toEqual([]);
+  });
 });

@@ -27,5 +27,5 @@ Screenshots: <BEFORE and AFTER links>
 |---|---|---|
 | Tokens | <range> | <measured> |
 | Agent hours | <est> | <measured> |
-| Usage cost ($) | <est> | <measured> |
+| Usage cost ($) | <est: $ at rate/M, ≈% of week> | <measured: $ at rate/M, ≈% of week> |
 | Financial impact ($) | <est, with inputs and assumptions> | <measured or n/a until known> |
