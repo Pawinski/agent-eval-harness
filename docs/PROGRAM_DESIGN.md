@@ -25,6 +25,10 @@ what they need without a guide.
 5. **Load order lives in an entry file.** When order matters, express it in one entry file
    that imports the other files by name. Do not encode order in file names.
 
+## How code is written
+
+**No code written in a string and then executed.** Do not use `eval`, `new Function`, `vm.runIn*`, `node -e`, `python -c`, or `bash -c` with logic in it. Code lives in real files. Test stubs are real functions, not strings. The only exemption is Playwright `page.evaluate`.
+
 ## Exemptions
 
 These names are exempt from the naming rules above. The list is final.
@@ -32,7 +36,7 @@ These names are exempt from the naming rules above. The list is final.
 - Names a tool requires: `AGENTS.md`, `Dockerfile`, `package.json`, `README`,
   `tsconfig.json` and similar, and the `.github/` folder.
 - `.env.example`, a tool convention.
-- The `src/` and `docs/` folder names.
+- The `src/`, `docs/` and `bin/` folder names.
 - Run files under `results/`. They are generated data, not code, so these rules do not
   apply to them and they are never renamed.
 

@@ -182,6 +182,10 @@ See `.env.example`:
 - `MAX_TOKENS` — max tokens per completion (default 512)
 - `AGENT_EVAL_CACHE_BREAKPOINT` — enable cache breakpoint (default off)
 
+## GitHub access
+
+`bin/gh-glassrose` and `bin/git-credential-glassrose-app` mint a short-lived installation token for glassrose-agent-bot, scoped to this repository only, and refuse any other host or path (no fallback).
+
 ## License
 
 MIT
