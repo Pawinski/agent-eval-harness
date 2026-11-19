@@ -204,12 +204,41 @@ Only include the settings you want to override.
 
 See `.env.example`:
 
-- `OPENROUTER_API_KEY` — required for live LLM score
+- `OPENROUTER_API_KEY` — required for live LLM score (OpenRouter)
+- `OPENAI_API_KEY` — for direct OpenAI API access
+- `ANTHROPIC_API_KEY` — for direct Anthropic API access
+- `OLLAMA_HOST` — Ollama server URL (default: http://localhost:11434)
 - `MODEL` — pluggable model id (OpenRouter format)
 - `OPENROUTER_BASE_URL` — optional API base override
 - `MAX_TOKENS` — max tokens per completion (default 512)
 - `AGENT_EVAL_CACHE_BREAKPOINT` — enable cache breakpoint (default off)
 - `RETRY_DELAYS_MS` — 429 retry backoff in ms, comma-separated (default 15000,60000,180000)
+
+## LLM Providers
+
+The harness supports multiple LLM providers:
+
+| Provider | Model Format | Env Var | Description |
+|----------|--------------|---------|-------------|
+| OpenRouter | `provider/model` (e.g., `openai/gpt-4o`) | `OPENROUTER_API_KEY` | Routes to multiple providers via OpenRouter |
+| OpenAI | `gpt-*`, `o1-*`, `o3-*` | `OPENAI_API_KEY` | Direct OpenAI API access |
+| Anthropic | `claude-*` | `ANTHROPIC_API_KEY` | Direct Anthropic API access |
+| Ollama | `model:tag` (e.g., `llama3:latest`) | `OLLAMA_HOST` | Local inference via Ollama |
+
+**Auto-detection**: The provider is automatically detected from:
+1. Model ID format (e.g., `gpt-4o` → OpenAI, `claude-3-opus` → Anthropic)
+2. Environment variables (first match wins: OPENAI → ANTHROPIC → OLLAMA → OPENROUTER)
+
+**Explicit selection** via config:
+
+```json
+{
+  "llm": {
+    "provider": "openai",
+    "defaultModel": "gpt-4o"
+  }
+}
+```
 
 ## License
 

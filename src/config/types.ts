@@ -3,10 +3,14 @@
  * All settings can come from: config file < env vars < CLI flags (later sources override).
  */
 
+export type ProviderType = "openrouter" | "openai" | "anthropic" | "ollama";
+
 export interface LlmConfig {
+  /** LLM provider to use (auto-detected from model or env if not specified) */
+  provider?: ProviderType;
   /** OpenRouter API key (env: OPENROUTER_API_KEY) */
   apiKey?: string;
-  /** OpenRouter base URL (env: OPENROUTER_BASE_URL) */
+  /** API base URL (provider-specific default if not set) */
   baseUrl: string;
   /** Default model ID in provider/model format */
   defaultModel: string;
@@ -63,6 +67,7 @@ export interface EvalConfig {
 }
 
 export interface PartialLlmConfig {
+  provider?: ProviderType;
   apiKey?: string;
   baseUrl?: string;
   defaultModel?: string;
