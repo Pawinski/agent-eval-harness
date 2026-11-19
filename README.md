@@ -172,7 +172,35 @@ Suite 0.2.0 introduces 6 new tools (11 total): `read_file`, `apply_patch`, `run_
 
 Suite 0.2.0 requires **Node >= 22** with permission model support. Patch verification executes model-generated code in a separate permission-restricted Node process with a hard timeout. A preflight check runs at startup and exits with an error if the permission model is unavailable.
 
-## Env
+## Configuration
+
+Settings can come from three sources (later sources override earlier):
+
+1. **Defaults** — built-in values in `src/config/defaults.ts`
+2. **Config file** — `eval.config.json` in the project root
+3. **Environment variables** — see `.env.example`
+4. **CLI flags** — command-line arguments
+
+### Config file
+
+Copy `eval.config.example.json` to `eval.config.json` to customize:
+
+```json
+{
+  "llm": {
+    "defaultModel": "anthropic/claude-3-opus",
+    "maxCompletionTokens": 1024
+  },
+  "matrix": {
+    "defaultRuns": 5,
+    "defaultCapUsd": 50
+  }
+}
+```
+
+Only include the settings you want to override.
+
+### Environment variables
 
 See `.env.example`:
 
@@ -181,6 +209,7 @@ See `.env.example`:
 - `OPENROUTER_BASE_URL` — optional API base override
 - `MAX_TOKENS` — max tokens per completion (default 512)
 - `AGENT_EVAL_CACHE_BREAKPOINT` — enable cache breakpoint (default off)
+- `RETRY_DELAYS_MS` — 429 retry backoff in ms, comma-separated (default 15000,60000,180000)
 
 ## License
 

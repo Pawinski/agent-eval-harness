@@ -1,0 +1,37 @@
+{
+  "$schema": "./src/config/schema.json",
+  "llm": {
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "defaultModel": "openai/gpt-4o-mini",
+    "maxCompletionTokens": 512,
+    "cacheBreakpoint": false
+  },
+  "retry": {
+    "delays": [15000, 60000, 180000]
+  },
+  "agent": {
+    "defaultMaxSteps": 8,
+    "maxInputTokens": 4700,
+    "maxObservationChars": 4096
+  },
+  "sandbox": {
+    "childTimeoutMs": 2000,
+    "preludeTimeoutMs": 50,
+    "functionTimeoutMs": 50,
+    "callTimeoutMs": 100,
+    "permissionProbeTimeoutMs": 5000
+  },
+  "matrix": {
+    "defaultSuite": "0.2.0",
+    "defaultRuns": 3,
+    "defaultCapUsd": 35,
+    "defaultModels": [
+      "nex-agi/nex-n2.5-pro",
+      "openai/gpt-4o-mini",
+      "anthropic/claude-haiku-5.5",
+      "mistralai/mistral-large-2512",
+      "openai/gpt-6.1-sol",
+      "anthropic/claude-opus-5.5"
+    ]
+  }
+}

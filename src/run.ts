@@ -11,9 +11,10 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReactAgent } from "./agent/react.js";
-import { createLlmClient, OpenRouterClient, parseRetryDelaysEnv } from "./llm/index.js";
+import { createLlmClient, OpenRouterClient } from "./llm/index.js";
 import { PROJECT_NAME } from "./name.js";
 import { fetchModelPricesWithParams } from "./matrix/prices.js";
+import { getConfig, parseRetryDelays } from "./config/index.js";
 import {
   createDefaultMcpClient,
   InProcessMcpClient,
@@ -42,8 +43,8 @@ type CliArgs = {
   help: boolean;
 };
 
-function parseArgs(argv: string[]): CliArgs {
-  const out: CliArgs = { fixture: false, help: false, suite: "0.2.0" };
+function parseArgs(argv: string[], defaultSuite: string): CliArgs {
+  const out: CliArgs = { fixture: false, help: false, suite: defaultSuite };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--fixture" || a === "-f") out.fixture = true;
@@ -90,7 +91,7 @@ async function runOneTask(
   let steps: number;
   let transcript = "";
 
-  const maxSteps = opts.maxSteps ?? 8;
+  const maxSteps = opts.maxSteps ?? getConfig().agent.defaultMaxSteps;
 
   if (opts.fixture) {
     finalAnswer = task.fixtureAnswer ?? "";
@@ -185,13 +186,14 @@ function getSuiteTasksList(suite: string): SuiteTask[] {
   throw new Error(`Unknown suite version: ${suite}`);
 }
 
-function getV2TaskMaxSteps(taskId: string): number {
+function getV2TaskMaxSteps(taskId: string, defaultMaxSteps: number): number {
   const task = TASKS_V2.find((t) => t.id === taskId);
-  return task?.maxSteps ?? 8;
+  return task?.maxSteps ?? defaultMaxSteps;
 }
 
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
+  const config = getConfig();
+  const args = parseArgs(process.argv.slice(2), config.matrix.defaultSuite);
   if (args.help) {
     printHelp();
     process.exit(0);
@@ -216,7 +218,7 @@ async function main(): Promise<void> {
 
   const retryDelaysRaw = process.env.RETRY_DELAYS_MS;
   if (retryDelaysRaw !== undefined && retryDelaysRaw !== "") {
-    const parsed = parseRetryDelaysEnv(retryDelaysRaw);
+    const parsed = parseRetryDelays(retryDelaysRaw);
     if (!parsed) {
       console.error(`Error: RETRY_DELAYS_MS is invalid (must be comma-separated positive integers, no empty pieces).`);
       process.exit(1);
@@ -250,7 +252,7 @@ async function main(): Promise<void> {
       const v2Ctx = createToolsV2Context();
       return new InProcessMcpClient(createToolsV2Options(v2Ctx));
     };
-    maxObservationChars = 4096;
+    maxObservationChars = config.agent.maxObservationChars;
   }
 
   console.log(`${PROJECT_NAME} suite ${suiteVersion}`);
@@ -263,7 +265,7 @@ async function main(): Promise<void> {
   let parametersFetched: boolean | null = null;
   if (mode === "live") {
     const liveModel = new OpenRouterClient().modelId;
-    const base = (process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1").replace(/\/$/, "");
+    const base = config.llm.baseUrl.replace(/\/$/, "");
     try {
       const p = await fetchModelPricesWithParams([liveModel], `${base}/models`);
       parametersFetched = p.parametersFetched;
@@ -275,7 +277,9 @@ async function main(): Promise<void> {
 
   const outcomes: TaskOutcome[] = [];
   for (const task of tasks) {
-    const maxSteps = suiteVersion === "0.2.0" ? getV2TaskMaxSteps(task.id) : 8;
+    const maxSteps = suiteVersion === "0.2.0" 
+      ? getV2TaskMaxSteps(task.id, config.agent.defaultMaxSteps) 
+      : config.agent.defaultMaxSteps;
     const outcome = await runOneTask(task, {
       fixture: args.fixture,
       runId,
