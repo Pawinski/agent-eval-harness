@@ -67,7 +67,14 @@ export function checkPullRequestDescription(body: string): string[] {
   }
   const firstHeading = Math.min(...positions.filter((position) => position !== -1));
   if (Number.isFinite(firstHeading)) {
-    lines.slice(firstHeading).forEach((line, index) => {
+    const linesToCheck = lines.slice(firstHeading);
+    const endMarkerIndex = linesToCheck.findIndex((line) =>
+      line.includes("CURSOR_AGENT_PR_BODY_END"),
+    );
+    const relevantLines =
+      endMarkerIndex === -1 ? linesToCheck : linesToCheck.slice(0, endMarkerIndex);
+
+    relevantLines.forEach((line, index) => {
       if (/<[^<>\n]+>/.test(line)) {
         problems.push(`Unfilled <...> placeholder on line ${firstHeading + index + 1}: ${line.trim()}`);
       }

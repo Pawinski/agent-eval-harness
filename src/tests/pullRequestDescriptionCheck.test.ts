@@ -75,4 +75,12 @@ describe("checkPullRequestDescription", () => {
     const body = validBody.replace("| Financial impact ($) | 0, docs only | n/a until known |", "| Financial impact ($) | n/a: process change | n/a: process change |");
     expect(checkPullRequestDescription(body)).toEqual([]);
   });
+  it("ignores HTML in system-appended footer after CURSOR_AGENT_PR_BODY_END marker", () => {
+    const bodyWithFooter = validBody + "\n<!-- CURSOR_AGENT_PR_BODY_END -->\n<div><a href=\"https://example.com\"><img src=\"test.png\"></a></div>";
+    expect(checkPullRequestDescription(bodyWithFooter)).toEqual([]);
+  });
+  it("still catches placeholders before CURSOR_AGENT_PR_BODY_END marker", () => {
+    const bodyWithPlaceholder = validBody.replace("It fixes a real problem.", "<placeholder>") + "\n<!-- CURSOR_AGENT_PR_BODY_END -->\n<div></div>";
+    expect(checkPullRequestDescription(bodyWithPlaceholder).some((problem) => problem.includes("Unfilled"))).toBe(true);
+  });
 });
