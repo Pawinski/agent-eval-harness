@@ -61,7 +61,8 @@ class MeterTests(unittest.TestCase):
         self.assertEqual(rows[0]["tokens_estimated"], "200000")
 
     def test_task_points_from_rate(self):
-        write_daily(self.root, date="2026-11-12", points="1.2", tokens="600000",
+        # Date the calibration row on the day the meter will stamp the task, so it stays inside the 7-day window.
+        write_daily(self.root, date=meter.today(), points="1.2", tokens="600000",
                     tokens_per_point="500000", tokens_measured="600000")
         start = run(self.root, [
             "start", "demo", "--bot", "ExampleBot",
