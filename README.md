@@ -215,6 +215,10 @@ See `.env.example`:
 
 `bin/gh-glassrose` and `bin/git-credential-glassrose-app` mint a short-lived installation token for glassrose-agent-bot, scoped to this repository only, and refuse any other host or path (no fallback).
 
+## Token meter
+
+`tools/token-meter/` records task estimates and gross token actuals as points of the weekly usage limit (1 point = 1% of that week's total). See `tools/token-meter/README.md`. Set `METER_ROOT` to the log directory; if unset, data is written under `logs/token-meter/`.
+
 ## License
 
 MIT
