@@ -5,6 +5,7 @@ export const requiredHeadings = [
   "Filed by:",
   "## Why",
   "## What changed",
+  "## Deleted / simplified",
   "## Proof",
   "## Risk and veto",
   "## Cost",
@@ -15,6 +16,24 @@ function findHeadingLine(lines: string[], heading: string): number {
     const trimmed = line.trim();
     return heading.startsWith("## ") ? trimmed === heading : trimmed.startsWith(heading);
   });
+}
+
+function sectionLinesAfter(lines: string[], headingLine: number): string[] {
+  const after = lines.slice(headingLine + 1);
+  const nextHeading = after.findIndex((line) => /^#{1,6}\s/.test(line.trim()));
+  return nextHeading === -1 ? after : after.slice(0, nextHeading);
+}
+
+function normalizeSectionLine(line: string): string {
+  return line
+    .trim()
+    .replace(/^[-*]\s+/, "")
+    .replace(/^`+|`+$/g, "")
+    .trim();
+}
+
+function isBareNone(text: string): boolean {
+  return /^none\.?$/i.test(text);
 }
 
 /** Returns a list of problems; an empty list means the description passes. */
@@ -34,12 +53,31 @@ export function checkPullRequestDescription(body: string): string[] {
     previous = Math.max(previous, position);
   });
 
-  const whyLine = positions[2];
+  const whyHeadingIndex = requiredHeadings.indexOf("## Why");
+  const whyLine = positions[whyHeadingIndex];
   if (whyLine !== -1) {
-    const after = lines.slice(whyLine + 1);
-    const nextHeading = after.findIndex((line) => /^#{1,6}\s/.test(line.trim()));
-    const whyText = (nextHeading === -1 ? after : after.slice(0, nextHeading)).join("").trim();
+    const whyText = sectionLinesAfter(lines, whyLine).join("").trim();
     if (whyText === "") problems.push("The Why section is empty.");
+  }
+
+  const deletedHeadingIndex = requiredHeadings.indexOf("## Deleted / simplified");
+  const deletedLine = positions[deletedHeadingIndex];
+  if (deletedLine !== -1) {
+    const deletedLines = sectionLinesAfter(lines, deletedLine);
+    const deletedText = deletedLines.join("").trim();
+    if (deletedText === "") {
+      problems.push("The Deleted / simplified section is empty.");
+    } else {
+      const contentLines = deletedLines.map((line) => line.trim()).filter((line) => line !== "");
+      const normalizedLines = contentLines.map((line) => normalizeSectionLine(line));
+      if (normalizedLines.every((line) => isBareNone(line))) {
+        problems.push('The Deleted / simplified section is a bare "none".');
+      }
+      const normalizedBlock = normalizedLines.join("\n");
+      if (/^Nothing deleted:\s*$/i.test(normalizedBlock)) {
+        problems.push('The Deleted / simplified section needs a reason after "Nothing deleted:".');
+      }
+    }
   }
 
   for (const line of lines) {
@@ -48,7 +86,8 @@ export function checkPullRequestDescription(body: string): string[] {
     const reason = match[1].replace(/`/g, "").replace(/^[\s—–:-]+/, "").trim();
     if (reason === "") problems.push(`"UI: none" needs a reason, for example "UI: none — docs only".`);
   }
-  const costLine = positions[6];
+  const costHeadingIndex = requiredHeadings.indexOf("## Cost");
+  const costLine = positions[costHeadingIndex];
   if (costLine !== -1) {
     const costRows = lines.slice(costLine + 1).map((line) => line.trim().toLowerCase());
     if (!costRows.some((row) => row.startsWith("| usage cost"))) {

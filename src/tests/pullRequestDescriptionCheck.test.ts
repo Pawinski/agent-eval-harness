@@ -12,6 +12,9 @@ const validBody = [
   "## What changed",
   "- a file",
   "",
+  "## Deleted / simplified",
+  "Nothing deleted: the change only adds a required heading check.",
+  "",
   "## Proof",
   "`UI: none — docs only`",
   "",
@@ -32,13 +35,52 @@ describe("checkPullRequestDescription", () => {
     const problems = checkPullRequestDescription(validBody.replace("## Proof\n", ""));
     expect(problems).toContain("Missing heading: ## Proof");
   });
+  it("fails when the Deleted / simplified heading is missing", () => {
+    const problems = checkPullRequestDescription(
+      validBody.replace("## Deleted / simplified\nNothing deleted: the change only adds a required heading check.\n\n", ""),
+    );
+    expect(problems).toContain("Missing heading: ## Deleted / simplified");
+  });
   it("fails when headings are out of order", () => {
     const swapped = validBody.replace("## What changed", "## TEMP").replace("## Why", "## What changed").replace("## TEMP", "## Why");
     expect(checkPullRequestDescription(swapped).some((problem) => problem.startsWith("Heading out of order"))).toBe(true);
   });
+  it("fails when Deleted / simplified is after Proof", () => {
+    const moved = validBody
+      .replace("## Deleted / simplified\nNothing deleted: the change only adds a required heading check.\n\n", "")
+      .replace("## Proof\n", "## Proof\n\n## Deleted / simplified\nNothing deleted: the change only adds a required heading check.\n");
+    expect(checkPullRequestDescription(moved).some((problem) => problem.startsWith("Heading out of order"))).toBe(true);
+  });
   it("fails when the Why section is empty", () => {
     const problems = checkPullRequestDescription(validBody.replace("It fixes a real problem.", ""));
     expect(problems).toContain("The Why section is empty.");
+  });
+  it("fails when the Deleted / simplified section is empty", () => {
+    const problems = checkPullRequestDescription(
+      validBody.replace("Nothing deleted: the change only adds a required heading check.", ""),
+    );
+    expect(problems).toContain("The Deleted / simplified section is empty.");
+  });
+  it("fails on a bare none in Deleted / simplified", () => {
+    const problems = checkPullRequestDescription(
+      validBody.replace("Nothing deleted: the change only adds a required heading check.", "none"),
+    );
+    expect(problems).toContain('The Deleted / simplified section is a bare "none".');
+  });
+  it("fails on a bulleted bare none in Deleted / simplified", () => {
+    const problems = checkPullRequestDescription(
+      validBody.replace("Nothing deleted: the change only adds a required heading check.", "- none"),
+    );
+    expect(problems).toContain('The Deleted / simplified section is a bare "none".');
+  });
+  it("passes a valid Nothing deleted reason", () => {
+    expect(checkPullRequestDescription(validBody)).toEqual([]);
+  });
+  it("fails when Nothing deleted has no reason", () => {
+    const problems = checkPullRequestDescription(
+      validBody.replace("Nothing deleted: the change only adds a required heading check.", "Nothing deleted:"),
+    );
+    expect(problems).toContain('The Deleted / simplified section needs a reason after "Nothing deleted:".');
   });
   it("fails on a bare UI: none", () => {
     const problems = checkPullRequestDescription(validBody.replace("`UI: none — docs only`", "UI: none"));

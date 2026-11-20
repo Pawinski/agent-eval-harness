@@ -9,6 +9,12 @@ Filed by: <AgentBot>, via <LeadBot>, <Day D Mon YYYY h:mm AM/PM ET>, while <what
 - <change 1, file or area>
 - <change 2>
 
+## Deleted / simplified
+- Removed: <files, functions, flags, deps; +X/−Y lines>
+- Considered removing but kept: <what, and why>
+- Complexity added: <what, and why it's needed>
+— or — `Nothing deleted: <one-line reason the simpler route doesn't work>`
+
 ## Proof
 | Command | Result |
 |---|---|
