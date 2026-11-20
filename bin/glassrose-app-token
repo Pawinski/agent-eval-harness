@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Mints a short-lived GitHub App installation token for glassrose-agent-bot,
+# scoped to Pawinski/agent-eval-harness. Prints the token on stdout ONLY for
+# capture by a caller (credential helper / GH_TOKEN=$(...)). Never echo it to
+# a terminal or log.
+set -euo pipefail
+umask 077
+: "${GLASSROSE_APP_ID:?missing}" "${GLASSROSE_APP_INSTALLATION_ID:?missing}" "${GLASSROSE_APP_PRIVATE_KEY:?missing}"
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+keyfile=$(mktemp)
+cleanup() { rm -f "$keyfile"; }
+trap cleanup EXIT
+# accept a normal PEM, literal \n, or a single-line PEM whose newlines became spaces
+k=${GLASSROSE_APP_PRIVATE_KEY//\\n/ }
+body=${k#*-----BEGIN RSA PRIVATE KEY-----}; body=${body%%-----END RSA PRIVATE KEY-----*}
+{ echo '-----BEGIN RSA PRIVATE KEY-----'; tr -s ' \t\r\n' '\n' <<<"$body" | sed '/^$/d'; echo '-----END RSA PRIVATE KEY-----'; } > "$keyfile"
+unset k body
+now=$(date +%s)
+hdr=$(printf '{"alg":"RS256","typ":"JWT"}' | b64url)
+pl=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' $((now-60)) $((now+540)) "$GLASSROSE_APP_ID" | b64url)
+sig=$(printf '%s.%s' "$hdr" "$pl" | openssl dgst -sha256 -sign "$keyfile" -binary | b64url)
+jwt="$hdr.$pl.$sig"
+resp=$(curl -fsS -X POST \
+  -H "Authorization: Bearer $jwt" -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  -d '{"repositories":["agent-eval-harness"]}' \
+  "https://api.github.com/app/installations/${GLASSROSE_APP_INSTALLATION_ID}/access_tokens") || { echo "glassrose-app-token: GitHub refused the App (no fallback)" >&2; exit 1; }
+tok=$(jq -r '.token // empty' <<<"$resp")
+[ -n "$tok" ] || { echo "glassrose-app-token: no token in response" >&2; exit 1; }
+printf '%s' "$tok"

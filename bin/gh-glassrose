@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# gh wrapper: runs gh as glassrose-agent-bot[bot] against Pawinski/agent-eval-harness only.
+# Never falls back to any other login (GH_TOKEN overrides stored auth).
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+GH_TOKEN=$("$here/glassrose-app-token") || { echo "gh-glassrose: App refused, stopping (no fallback)" >&2; exit 1; }
+export GH_TOKEN GH_REPO=Pawinski/agent-eval-harness
+exec gh "$@"

@@ -211,6 +211,10 @@ See `.env.example`:
 - `AGENT_EVAL_CACHE_BREAKPOINT` — enable cache breakpoint (default off)
 - `RETRY_DELAYS_MS` — 429 retry backoff in ms, comma-separated (default 15000,60000,180000)
 
+## GitHub access
+
+`bin/gh-glassrose` and `bin/git-credential-glassrose-app` mint a short-lived installation token for glassrose-agent-bot, scoped to this repository only, and refuse any other host or path (no fallback).
+
 ## License
 
 MIT
